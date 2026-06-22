@@ -1,2 +1,1 @@
-# Example
-An example greeter plugin
+Some .wav SFX I have compiled for the Custom Weapon SFX Plugin
