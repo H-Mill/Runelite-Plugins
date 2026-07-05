@@ -15,9 +15,10 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @Slf4j
 @PluginDescriptor(
-	name = "Death Counter",
-	description = "Tracks how many times you have died and shows the total in a movable overlay",
-	tags = {"death", "counter", "deaths", "overlay", "tracker"}
+		name = "Death Counter",
+		description = "Tracks how many times you have died and shows the total in a movable overlay",
+		tags = {"death", "counter", "deaths", "overlay", "tracker"},
+		configName = "DeathCounterPlugin"
 )
 public class DeathCounterPlugin extends Plugin
 {
