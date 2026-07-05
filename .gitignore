@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# Except directories (so git can descend into them) and .wav files
+!*/
+!*.wav
+
+# Keep this .gitignore tracked
+!.gitignore
