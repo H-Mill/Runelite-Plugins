@@ -42,6 +42,10 @@ public class DeathCounterPlugin extends Plugin
 	@Getter
 	private int deaths;
 
+	// All-time total; incremented alongside deaths but never cleared by the per-session resets.
+	@Getter
+	private int allTimeDeaths;
+
 	// True once we've seen LOGGING_IN, so the following LOGGED_IN is a real login and not a world hop.
 	private boolean loginPending;
 
@@ -52,10 +56,11 @@ public class DeathCounterPlugin extends Plugin
 	protected void startUp() throws Exception
 	{
 		deaths = loadDeaths();
+		allTimeDeaths = loadAllTimeDeaths();
 		loginPending = false;
 		skipNextLoginReset = false;
 		overlayManager.add(overlay);
-		log.debug("Death Counter started with {} deaths", deaths);
+		log.debug("Death Counter started with {} deaths ({} all-time)", deaths, allTimeDeaths);
 
 		if (config.resetOnClientOpen())
 		{
@@ -78,22 +83,28 @@ public class DeathCounterPlugin extends Plugin
 	{
 		if (actorDeath.getActor() == client.getLocalPlayer())
 		{
-			deaths++;
-			saveDeaths(deaths);
-			log.debug("Local player died, death count now {}", deaths);
+			incrementDeaths();
+			log.debug("Local player died, death count now {} ({} all-time)", deaths, allTimeDeaths);
 		}
 	}
 
 	@Subscribe
 	public void onCommandExecuted(CommandExecuted event)
 	{
-		// Dev helper: "::dcIncrement" bumps the counter without needing to actually die.
-		if ("dcIncrement".equalsIgnoreCase(event.getCommand()))
+		// Dev helper: "::dcadd" bumps the counter without needing to actually die.
+		if ("dcadd".equalsIgnoreCase(event.getCommand()))
 		{
-			deaths++;
-			saveDeaths(deaths);
-			log.debug("::dcIncrement, death count now {}", deaths);
+			incrementDeaths();
+			log.debug("::dcadd, death count now {} ({} all-time)", deaths, allTimeDeaths);
 		}
+	}
+
+	private void incrementDeaths()
+	{
+		deaths++;
+		allTimeDeaths++;
+		saveDeaths(deaths);
+		saveAllTimeDeaths(allTimeDeaths);
 	}
 
 	@Subscribe
@@ -162,6 +173,18 @@ public class DeathCounterPlugin extends Plugin
 	private void saveDeaths(int value)
 	{
 		configManager.setConfiguration(DeathCounterConfig.GROUP, DeathCounterConfig.DEATHS_KEY, value);
+	}
+
+	private int loadAllTimeDeaths()
+	{
+		Integer stored = configManager.getConfiguration(
+			DeathCounterConfig.GROUP, DeathCounterConfig.ALL_TIME_DEATHS_KEY, int.class);
+		return stored == null ? 0 : stored;
+	}
+
+	private void saveAllTimeDeaths(int value)
+	{
+		configManager.setConfiguration(DeathCounterConfig.GROUP, DeathCounterConfig.ALL_TIME_DEATHS_KEY, value);
 	}
 
 	@Provides

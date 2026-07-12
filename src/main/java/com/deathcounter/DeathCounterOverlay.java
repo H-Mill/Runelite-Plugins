@@ -45,40 +45,81 @@ class DeathCounterOverlay extends Overlay
 		final FontMetrics fm = graphics.getFontMetrics();
 		final int lineHeight = fm.getHeight();
 
-		final String count = Integer.toString(plugin.getDeaths());
-		final int countWidth = fm.stringWidth(count);
-
-		final List<String> lines = wrap(config.counterLabel(), fm, MAX_LABEL_WIDTH);
-		int labelWidth = 0;
-		for (String line : lines)
+		final List<Row> rows = new ArrayList<>();
+		rows.add(buildRow(config.counterLabel(), plugin.getDeaths(), fm));
+		if (config.showAllTimeDeaths())
 		{
-			labelWidth = Math.max(labelWidth, fm.stringWidth(line));
+			rows.add(buildRow(config.allTimeLabel(), plugin.getAllTimeDeaths(), fm));
 		}
 
-		final int textHeight = lines.size() * lineHeight;
-		final int width = BORDER * 2 + labelWidth + GAP + countWidth;
-		final int height = BORDER * 2 + textHeight;
+		int contentWidth = 0;
+		int contentHeight = 0;
+		for (final Row row : rows)
+		{
+			contentWidth = Math.max(contentWidth, row.labelWidth + GAP + row.countWidth);
+			contentHeight += row.labelLines.size() * lineHeight;
+		}
+
+		final int width = BORDER * 2 + contentWidth;
+		final int height = BORDER * 2 + contentHeight;
 
 		background.setRectangle(new Rectangle(0, 0, width, height));
 		background.render(graphics);
 
-		int baseline = BORDER + fm.getAscent();
-		for (final String line : lines)
+		int rowTop = BORDER;
+		for (final Row row : rows)
 		{
-			final TextComponent lineText = new TextComponent();
-			lineText.setText(line);
-			lineText.setPosition(new Point(BORDER, baseline));
-			lineText.render(graphics);
-			baseline += lineHeight;
+			final int rowHeight = row.labelLines.size() * lineHeight;
+
+			int baseline = rowTop + fm.getAscent();
+			for (final String line : row.labelLines)
+			{
+				final TextComponent lineText = new TextComponent();
+				lineText.setText(line);
+				lineText.setPosition(new Point(BORDER, baseline));
+				lineText.render(graphics);
+				baseline += lineHeight;
+			}
+
+			final int countBaseline = rowTop + fm.getAscent() + (rowHeight - lineHeight) / 2;
+			final TextComponent countText = new TextComponent();
+			countText.setText(row.count);
+			countText.setPosition(new Point(width - BORDER - row.countWidth, countBaseline));
+			countText.render(graphics);
+
+			rowTop += rowHeight;
 		}
 
-		final int countBaseline = BORDER + fm.getAscent() + (textHeight - lineHeight) / 2;
-		final TextComponent countText = new TextComponent();
-		countText.setText(count);
-		countText.setPosition(new Point(width - BORDER - countWidth, countBaseline));
-		countText.render(graphics);
-
 		return new Dimension(width, height);
+	}
+
+	private Row buildRow(String label, int value, FontMetrics fm)
+	{
+		final List<String> labelLines = wrap(label, fm, MAX_LABEL_WIDTH);
+		int labelWidth = 0;
+		for (final String line : labelLines)
+		{
+			labelWidth = Math.max(labelWidth, fm.stringWidth(line));
+		}
+
+		final String count = Integer.toString(value);
+		return new Row(labelLines, labelWidth, count, fm.stringWidth(count));
+	}
+
+	private static final class Row
+	{
+		private final List<String> labelLines;
+		private final int labelWidth;
+		private final String count;
+		private final int countWidth;
+
+		Row(List<String> labelLines, int labelWidth, String count, int countWidth)
+		{
+			this.labelLines = labelLines;
+			this.labelWidth = labelWidth;
+			this.count = count;
+			this.countWidth = countWidth;
+		}
 	}
 
 	private static List<String> wrap(String text, FontMetrics fm, int maxWidth)
