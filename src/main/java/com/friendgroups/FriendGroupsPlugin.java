@@ -72,7 +72,6 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.OverlayMenuClicked;
 import net.runelite.client.game.ChatIconManager;
-import net.runelite.client.game.WorldService;
 import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -84,9 +83,6 @@ import net.runelite.client.ui.overlay.OverlayMenuEntry;
 import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
-import net.runelite.client.util.WorldUtil;
-import net.runelite.http.api.worlds.World;
-import net.runelite.http.api.worlds.WorldResult;
 
 @Slf4j
 @PluginDescriptor(
@@ -109,9 +105,6 @@ public class FriendGroupsPlugin extends Plugin
 
 	/** Cap, past which the row's dots outgrow the friends list column. */
 	private static final int MAX_DOTS = 4;
-
-	/** Game ticks to keep trying to open the world switcher before giving up on a hop. */
-	private static final int MAX_HOP_ATTEMPTS = 20;
 
 	/** Prefix the game puts before the world number in each online friend's row. */
 	private static final String WORLD_PREFIX = "World ";
@@ -156,9 +149,6 @@ public class FriendGroupsPlugin extends Plugin
 	private FriendListReorderer reorderer;
 
 	@Inject
-	private WorldService worldService;
-
-	@Inject
 	@Named("developerMode")
 	private boolean developerMode;
 
@@ -180,10 +170,6 @@ public class FriendGroupsPlugin extends Plugin
 
 	/** Normalized names of the current friends. Client thread only. */
 	private Set<String> friendKeys = Collections.emptySet();
-
-	/** Quick-hop target set by a double-click; consumed over the next few game ticks. */
-	private net.runelite.api.World quickHopTargetWorld;
-	private int hopAttempts;
 
 	/** Dots emitted for the row currently being laid out, so the x-shift matches the text. */
 	private int rowDots;
@@ -243,7 +229,6 @@ public class FriendGroupsPlugin extends Plugin
 		rebuildNavButton();
 		overlayManager.add(overlay);
 
-		panel.setOnHopFriend(this::hopToFriend);
 		panel.setOnOpenConfig(this::openConfiguration);
 		final boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
 		SwingUtilities.invokeLater(() ->
@@ -267,8 +252,6 @@ public class FriendGroupsPlugin extends Plugin
 		friendWorlds = Collections.emptyMap();
 		friendKeys = Collections.emptySet();
 		playerWorld = 0;
-		quickHopTargetWorld = null;
-		hopAttempts = 0;
 
 		// Redraw without our decorations. ChatIconManager has no way to drop the dot
 		// icons we registered, so they are deliberately left behind for a later start.
@@ -426,8 +409,6 @@ public class FriendGroupsPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
-		driveQuickHop();
-
 		final FriendContainer container = client.getFriendContainer();
 		if (container == null)
 		{
@@ -462,102 +443,6 @@ public class FriendGroupsPlugin extends Plugin
 			friendKeys = keys;
 
 			SwingUtilities.invokeLater(() -> panel.setFriends(current, world));
-		}
-	}
-
-	/**
-	 * Hops to a friend's current world, mirroring the World Hopper plugin's quick-hop: it
-	 * takes a couple of game ticks to open the world switcher and then hop. Called from the
-	 * side panel on the Swing thread.
-	 */
-	private void hopToFriend(String friendName)
-	{
-		clientThread.invoke(() ->
-		{
-			final FriendContainer container = client.getFriendContainer();
-			if (container == null)
-			{
-				return;
-			}
-
-			final Friend friend = container.findByName(friendName);
-			final int world = friend == null ? 0 : friend.getWorld();
-			if (world <= 0)
-			{
-				client.addChatMessage(ChatMessageType.CONSOLE, "",
-					"Friend Groups: " + friendName + " is not online, or their world is hidden.", null);
-				return;
-			}
-
-			if (world == client.getWorld())
-			{
-				client.addChatMessage(ChatMessageType.CONSOLE, "",
-					"Friend Groups: you are already on " + friendName + "'s world (W" + world + ").", null);
-				return;
-			}
-
-			startQuickHop(world, friendName);
-		});
-	}
-
-	private void startQuickHop(int worldId, String friendName)
-	{
-		final WorldResult worldResult = worldService.getWorlds();
-		if (worldResult == null)
-		{
-			return;
-		}
-
-		final World world = worldResult.findWorld(worldId);
-		if (world == null)
-		{
-			return;
-		}
-
-		final net.runelite.api.World rsWorld = client.createWorld();
-		rsWorld.setActivity(world.getActivity());
-		rsWorld.setAddress(world.getAddress());
-		rsWorld.setId(world.getId());
-		rsWorld.setPlayerCount(world.getPlayers());
-		rsWorld.setLocation(world.getLocation());
-		rsWorld.setTypes(WorldUtil.toWorldTypes(world.getTypes()));
-
-		if (client.getGameState() == GameState.LOGIN_SCREEN)
-		{
-			client.changeWorld(rsWorld);
-			return;
-		}
-
-		client.addChatMessage(ChatMessageType.CONSOLE, "",
-			"Friend Groups: hopping to " + friendName + "'s world (W" + worldId + ")...", null);
-		quickHopTargetWorld = rsWorld;
-		hopAttempts = 0;
-	}
-
-	/** Runs each tick while a quick-hop is pending: open the switcher, then hop. */
-	private void driveQuickHop()
-	{
-		if (quickHopTargetWorld == null)
-		{
-			return;
-		}
-
-		if (client.getWidget(InterfaceID.Worldswitcher.BUTTONS) == null)
-		{
-			client.openWorldHopper();
-
-			if (++hopAttempts >= MAX_HOP_ATTEMPTS)
-			{
-				client.addChatMessage(ChatMessageType.CONSOLE, "", "Friend Groups: failed to hop worlds.", null);
-				quickHopTargetWorld = null;
-				hopAttempts = 0;
-			}
-		}
-		else
-		{
-			client.hopToWorld(quickHopTargetWorld);
-			quickHopTargetWorld = null;
-			hopAttempts = 0;
 		}
 	}
 

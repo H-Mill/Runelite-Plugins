@@ -20,8 +20,6 @@ current world shown alongside. Green means they're on your world, yellow means
 they're online elsewhere, and greyed-out means offline. Friends who aren't in any
 group appear under **Ungrouped**.
 
-**Double-click an online friend** in the panel to hop straight to their world.
-
 ## In the in-game friends list
 
 Your groups can also show up directly in the game's friends list. Right‑click any

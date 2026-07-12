@@ -44,7 +44,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.Box;
@@ -160,9 +159,6 @@ class FriendGroupsPanel extends PluginPanel
 	/** Groups and friends are only shown while logged in. */
 	private boolean loggedIn;
 
-	/** Invoked with a friend's display name to hop to their world; set by the plugin. */
-	private Consumer<String> onHopFriend;
-
 	/** Opens this plugin's configuration panel; set by the plugin. */
 	private Runnable onOpenConfig;
 
@@ -237,11 +233,6 @@ class FriendGroupsPanel extends PluginPanel
 		scrollPane.getHorizontalScrollBar().updateUI();
 		scrollPane.setBorder(BorderFactory.createEmptyBorder());
 		scrollPane.setViewportBorder(BorderFactory.createEmptyBorder());
-	}
-
-	void setOnHopFriend(Consumer<String> onHopFriend)
-	{
-		this.onHopFriend = onHopFriend;
 	}
 
 	void setOnOpenConfig(Runnable onOpenConfig)
@@ -568,31 +559,6 @@ class FriendGroupsPanel extends PluginPanel
 		row.setBorder(new EmptyBorder(0, 14, 0, 2));
 		row.add(name, BorderLayout.WEST);
 		row.add(right, BorderLayout.EAST);
-
-		if (isOnline(member))
-		{
-			final String tooltip = "Double-click to hop to World " + world;
-			name.setToolTipText(tooltip);
-			row.setToolTipText(tooltip);
-			row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-			// The listener goes on the name too, not just the row: giving the name a tooltip
-			// registers it with the ToolTipManager, which makes it the mouse-event target so
-			// clicks on it no longer bubble up to the row.
-			final MouseAdapter hop = new MouseAdapter()
-			{
-				@Override
-				public void mouseClicked(MouseEvent e)
-				{
-					if (e.getClickCount() == 2 && onHopFriend != null)
-					{
-						onHopFriend.accept(member);
-					}
-				}
-			};
-			row.addMouseListener(hop);
-			name.addMouseListener(hop);
-		}
 
 		return row;
 	}
