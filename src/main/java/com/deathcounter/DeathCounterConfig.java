@@ -20,4 +20,26 @@ public interface DeathCounterConfig extends Config
 	{
 		return "Deaths";
 	}
+
+	@ConfigItem(
+		keyName = "resetOnClientOpen",
+		name = "Reset on client open",
+		description = "Reset the death counter each time the client starts up",
+		position = 1
+	)
+	default boolean resetOnClientOpen()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "resetOnLogin",
+		name = "Reset on login",
+		description = "Reset the death counter each time you log in. On client startup this is skipped when 'Reset on client open' has already reset the counter, so it is not reset twice.",
+		position = 2
+	)
+	default boolean resetOnLogin()
+	{
+		return false;
+	}
 }
