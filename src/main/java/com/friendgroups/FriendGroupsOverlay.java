@@ -37,7 +37,7 @@ import net.runelite.client.util.ColorUtil;
 
 /**
  * Names the groups of the friend currently hovered in the in-game friends list.
- * The row itself can only carry coloured dots, so the names live here.
+ * The row itself can only carry colored dots, so the names live here.
  */
 class FriendGroupsOverlay extends Overlay
 {

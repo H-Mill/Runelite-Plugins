@@ -54,8 +54,8 @@ public interface FriendGroupsConfig extends Config
 			keyName = "inGameMarker",
 			name = "In-game marker",
 			description = "How your friend groups are shown in the in-game friends list.<br>"
-			+ "'Coloured dots' adds a small colour swatch per group next to the name.<br>"
-			+ "'Grouped list' clusters the list under a coloured header per group, in your group order "
+			+ "'Colored dots' adds a small color swatch per group next to the name.<br>"
+			+ "'Grouped list' clusters the list under a colored header per group, in your group order "
 			+ "(experimental: it overrides the game's Name / Recent / World sorting, and a friend in "
 			+ "several groups appears under each of their groups)."
 	)

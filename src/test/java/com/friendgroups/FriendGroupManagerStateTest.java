@@ -181,7 +181,7 @@ public class FriendGroupManagerStateTest
 	{
 		manager.addGroup("a");
 		manager.addGroup("b");
-		// Distinct groups get distinct starting colours rather than all defaulting to one.
+		// Distinct groups get distinct starting colors rather than all defaulting to one.
 		assertFalse(manager.getGroups().get(0).getColor() == manager.getGroups().get(1).getColor());
 	}
 
@@ -242,7 +242,7 @@ public class FriendGroupManagerStateTest
 		assertEquals(Arrays.asList("PvM"), groupNames());
 	}
 
-	// ---- colour / collapse ----
+	// ---- color / collapse ----
 
 	@Test
 	public void setColorUpdatesTheGroup()

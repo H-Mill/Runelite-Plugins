@@ -57,7 +57,7 @@ import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.Text;
 
 /**
- * Reorders the in-game friends list into group clusters with a coloured header
+ * Reorders the in-game friends list into group clusters with a colored header
  * above each group, using the same idea as the Sailing Reorderer plugin: after
  * the list's build script has run, reposition the row widgets by rewriting their
  * {@code originalY} and revalidating.
@@ -208,7 +208,7 @@ class FriendListReorderer
 
 		SwingUtilities.invokeLater(() ->
 		{
-			final RuneliteColorPicker picker = colorPickerManager.create(client, current, "Group colour", true);
+			final RuneliteColorPicker picker = colorPickerManager.create(client, current, "Group color", true);
 			picker.setOnClose(color -> manager.setColor(name, color.getRGB() & 0xFFFFFF));
 			picker.setVisible(true);
 		});
@@ -550,7 +550,7 @@ class FriendListReorderer
 			header.setYTextAlignment(WidgetTextAlignment.CENTER);
 
 			// Left-click toggles collapse; every header can be reordered with Move up / Move down,
-			// and real groups also offer Rename / Set colour / Delete on right-click.
+			// and real groups also offer Rename / Set color / Delete on right-click.
 			header.clearActions();
 			header.setHasListener(true);
 			header.setNoClickThrough(true);
@@ -560,7 +560,7 @@ class FriendListReorderer
 			if (group != null)
 			{
 				header.setAction(3, "Rename");
-				header.setAction(4, "Set colour");
+				header.setAction(4, "Set color");
 				// "Delete group", not "Delete": the Hiscore plugin adds a "Lookup" entry to any
 				// friends-list row whose option is exactly "Delete".
 				header.setAction(5, "Delete group");
@@ -670,7 +670,7 @@ class FriendListReorderer
 
 	/**
 	 * Injects a duplicate of a friend's row at {@code newY}, for showing them under a second (or
-	 * further) group. Copies each of the row's text widgets - their text, colour and font - and,
+	 * further) group. Copies each of the row's text widgets - their text, color and font - and,
 	 * for the interactive one, its actions and game op listener, so the copy's right-click menu
 	 * (Message / Delete / Add ignore, plus this plugin's Assign group) acts on the same friend.
 	 * The small status icon is decorative and is not copied.

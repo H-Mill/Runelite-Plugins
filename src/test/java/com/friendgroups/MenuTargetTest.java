@@ -4,19 +4,19 @@ import static org.junit.Assert.assertEquals;
 import org.junit.Test;
 
 /**
- * The friends list menu target carries the row's colour tags for online status, and
- * 'Coloured dots' appends an {@code <img>} icon. Both have to come off before the name is used.
+ * The friends list menu target carries the row's color tags for online status, and
+ * 'Colored dots' appends an {@code <img>} icon. Both have to come off before the name is used.
  */
 public class MenuTargetTest
 {
 	@Test
-	public void stripsOnlineStatusColourTags()
+	public void stripsOnlineStatusColorTags()
 	{
 		assertEquals("Zezima", FriendGroupsPlugin.friendFromTarget("<col=00ff00>Zezima</col>"));
 	}
 
 	@Test
-	public void stripsAColouredDotIcon()
+	public void stripsAColoredDotIcon()
 	{
 		assertEquals("Zezima",
 			FriendGroupsPlugin.friendFromTarget("<col=00ff00>Zezima</col> <img=42>"));

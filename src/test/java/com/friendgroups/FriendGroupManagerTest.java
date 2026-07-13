@@ -9,7 +9,7 @@ import org.junit.Test;
 /**
  * Covers the name normalization that group membership, the rename migration and the
  * in-game row guard all key off. Names reach the plugin from the friend container,
- * from colour-tagged widget text and from config, each formatted differently.
+ * from color-tagged widget text and from config, each formatted differently.
  */
 public class FriendGroupManagerTest
 {
@@ -33,7 +33,7 @@ public class FriendGroupManagerTest
 	}
 
 	@Test
-	public void keyStripsColourTagsFromFriendsListText()
+	public void keyStripsColorTagsFromFriendsListText()
 	{
 		// This is the shape of the text the friends list hands to the script callback.
 		assertEquals(FriendGroupManager.key("Woox"), FriendGroupManager.key("<col=00ff00>Woox</col>"));

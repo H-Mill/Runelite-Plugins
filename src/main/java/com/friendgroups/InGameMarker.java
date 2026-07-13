@@ -27,13 +27,13 @@ package com.friendgroups;
 
 /**
  * How a friend's groups are shown in the in-game friends list: not at all, as a
- * coloured dot per group beside the name, or by clustering the whole list under a
- * coloured header per group.
+ * colored dot per group beside the name, or by clustering the whole list under a
+ * colored header per group.
  */
 public enum InGameMarker
 {
 	OFF("Off"),
-	DOT("Coloured dots"),
+	DOT("Colored dots"),
 	GROUPED("Grouped list");
 
 	private final String label;

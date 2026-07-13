@@ -38,7 +38,7 @@ can:
 
 - **Left-click** to collapse or expand that group.
 - **Right-click → Move up / Move down** to reorder groups without leaving the game.
-- **Right-click → Rename, Set colour, or Delete group** to manage a group in place.
+- **Right-click → Rename, Set color, or Delete group** to manage a group in place.
 
 Friends in more than one group show up under each of their groups, and offline groups
 tidy themselves away. The **Ungrouped** header can be collapsed and moved just like a
@@ -52,7 +52,7 @@ real group.
   - `Grouped list` (default) — clusters your friends under a colored header for each
     group. This takes over the game's Name / Recent / World sorting, applying your sort
     within each group instead.
-  - `Coloured dots` — leaves the list as-is and adds a small colored dot for each group
+  - `Colored dots` — leaves the list as-is and adds a small colored dot for each group
     next to a friend's name.
   - `Off` — no in-game marking.
 - **Hover tooltip** — show a friend's group names when you hover over them in the

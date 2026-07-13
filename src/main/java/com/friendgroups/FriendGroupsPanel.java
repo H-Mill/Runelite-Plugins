@@ -70,7 +70,7 @@ import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.LinkBrowser;
 
 /**
- * The side panel. Group order, names and colours are all edited here, since the
+ * The side panel. Group order, names and colors are all edited here, since the
  * in-game friends list is built and sorted by the game and cannot be reordered.
  */
 @Singleton
@@ -152,7 +152,7 @@ class FriendGroupsPanel extends PluginPanel
 	private List<String> friendNames = Collections.emptyList();
 	/** Normalized friend name -> world, 0 when offline. */
 	private Map<String, Integer> worldByKey = Collections.emptyMap();
-	/** Our current world, 0 when unknown. Friends on a different world are coloured differently. */
+	/** Our current world, 0 when unknown. Friends on a different world are colored differently. */
 	private int playerWorld;
 
 	/** Groups and friends are only shown while logged in. */
@@ -403,7 +403,7 @@ class FriendGroupsPanel extends PluginPanel
 		final JPanel swatch = new JPanel();
 		swatch.setPreferredSize(new Dimension(10, 10));
 		swatch.setBackground(group.getAwtColor());
-		swatch.setToolTipText("Change colour");
+		swatch.setToolTipText("Change color");
 		swatch.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		swatch.addMouseListener(new MouseAdapter()
 		{
@@ -662,7 +662,7 @@ class FriendGroupsPanel extends PluginPanel
 		}
 
 		final String name = group.getName();
-		final RuneliteColorPicker picker = colorPickerManager.create(owner, group.getAwtColor(), "Group colour", true);
+		final RuneliteColorPicker picker = colorPickerManager.create(owner, group.getAwtColor(), "Group color", true);
 		picker.setOnClose(color -> manager.setColor(name, color.getRGB() & 0xFFFFFF));
 		picker.setVisible(true);
 	}

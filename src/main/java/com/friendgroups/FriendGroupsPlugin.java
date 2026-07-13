@@ -99,7 +99,7 @@ public class FriendGroupsPlugin extends Plugin
 	private static final String NEW_GROUP_PROMPT = "Group name<br>"
 		+ ColorUtil.prependColorTag("(limit " + FriendGroupManager.MAX_NAME_LENGTH + " characters)", new Color(0, 0, 170));
 
-	/** One coloured square in the group grid, in pixels. Shrink or grow to taste. */
+	/** One colored square in the group grid, in pixels. Shrink or grow to taste. */
 	private static final int DOT_SIZE = 4;
 	/** Gap between squares in the grid. */
 	private static final int DOT_GAP = 1;
@@ -164,14 +164,14 @@ public class FriendGroupsPlugin extends Plugin
 
 	private NavigationButton navButton;
 
-	/** Ordered colours of one 2x2 grid batch (up to four) -> chat icon id. Client thread only. */
+	/** Ordered colors of one 2x2 grid batch (up to four) -> chat icon id. Client thread only. */
 	private final Map<List<Integer>, Integer> dotIcons = new HashMap<>();
 
 	private final Consumer<Boolean> groupsChangedListener = this::onGroupsChanged;
 
 	private Map<String, Integer> friendWorlds = Collections.emptyMap();
 
-	/** Our own world last pushed to the panel, so a hop re-colours friends by same/other world. */
+	/** Our own world last pushed to the panel, so a hop re-colors friends by same/other world. */
 	private int playerWorld;
 
 	/** Normalized names of the current friends. Client thread only. */
@@ -382,18 +382,31 @@ public class FriendGroupsPlugin extends Plugin
 
 	/**
 	 * The Name / Recent / World / Legacy sort buttons change {@link VarClientID#FRIENDS_SORT}
-	 * and redraw the list ungrouped. Force a clean {@link ScriptID#FRIENDS_UPDATE} so the
-	 * reorder re-runs from the freshly sorted rows, giving a sort that applies within groups.
+	 * and redraw the list ungrouped, without re-applying our layout. Force a clean
+	 * {@link ScriptID#FRIENDS_UPDATE} so the reorder re-runs from the freshly sorted rows:
+	 * in grouped mode this re-clusters them, and with hide-offline on it re-hides the offline
+	 * rows the sort redrew - otherwise they reappear.
 	 */
 	@Subscribe
 	public void onVarClientIntChanged(VarClientIntChanged event)
 	{
 		if (event.getIndex() == VarClientID.FRIENDS_SORT
-			&& config.inGameMarker() == InGameMarker.GROUPED
+			&& shouldRebuildOnSort(config.inGameMarker(), config.hideOffline())
 			&& client.getGameState() == GameState.LOGGED_IN)
 		{
 			clientThread.invokeLater(this::rebuildFriendsList);
 		}
+	}
+
+	/**
+	 * Whether a sort-button click needs a forced list rebuild. Grouped mode has to re-cluster the
+	 * freshly sorted rows, and hide-offline (in any marker mode) has to re-hide the offline rows the
+	 * sort redrew - without it they reappear. Off with hide-offline disabled leaves the game's own
+	 * sorted list untouched.
+	 */
+	static boolean shouldRebuildOnSort(InGameMarker marker, boolean hideOffline)
+	{
+		return marker == InGameMarker.GROUPED || hideOffline;
 	}
 
 	@Subscribe
@@ -525,7 +538,7 @@ public class FriendGroupsPlugin extends Plugin
 	@Subscribe
 	public void onScriptCallbackEvent(ScriptCallbackEvent event)
 	{
-		// Only 'Coloured dots' decorates individual rows. 'Off' does nothing, and 'Grouped list'
+		// Only 'Colored dots' decorates individual rows. 'Off' does nothing, and 'Grouped list'
 		// clusters the list under group headers that already convey membership.
 		if (config.inGameMarker() != InGameMarker.DOT)
 		{
@@ -589,7 +602,7 @@ public class FriendGroupsPlugin extends Plugin
 		rowDotShift = shift;
 	}
 
-	/** Ordered group colours for a friend, capped at the grids a row shows; empty when ungrouped. */
+	/** Ordered group colors for a friend, capped at the grids a row shows; empty when ungrouped. */
 	private List<Integer> dotColors(String name)
 	{
 		final List<FriendGroup> groups = manager.groupsFor(name);
@@ -611,7 +624,7 @@ public class FriendGroupsPlugin extends Plugin
 		return colors;
 	}
 
-	/** Splits a friend's colours into successive 2x2 batches of up to four, each drawn as one sprite. */
+	/** Splits a friend's colors into successive 2x2 batches of up to four, each drawn as one sprite. */
 	private static List<List<Integer>> dotGrids(List<Integer> colors)
 	{
 		final List<List<Integer>> grids = new ArrayList<>((colors.size() + GRID_CELLS - 1) / GRID_CELLS);
@@ -623,8 +636,8 @@ public class FriendGroupsPlugin extends Plugin
 	}
 
 	/**
-	 * Reads a friend's name out of a friends list menu target. Friends list entries carry colour
-	 * tags for online status, and 'Coloured dots' appends an {@code <img>} icon; a RuneScape name
+	 * Reads a friend's name out of a friends list menu target. Friends list entries carry color
+	 * tags for online status, and 'Colored dots' appends an {@code <img>} icon; a RuneScape name
 	 * holds neither, so stripping the tags leaves the name.
 	 */
 	static String friendFromTarget(String target)
@@ -681,7 +694,7 @@ public class FriendGroupsPlugin extends Plugin
 	}
 
 	/**
-	 * Ensures a grid sprite exists for every 2x2 colour batch a grouped friend needs. Batches are
+	 * Ensures a grid sprite exists for every 2x2 color batch a grouped friend needs. Batches are
 	 * registered lazily (only what a friend's group membership actually uses), since the theoretical
 	 * set across all groups is combinatorial. Driven off the manager's stored memberships rather than
 	 * the live friend container, so the sprites exist as soon as the config loads - the container is
@@ -729,10 +742,10 @@ public class FriendGroupsPlugin extends Plugin
 	}
 
 	/**
-	 * Builds a single sprite packing up to four group colours into a 2x2 grid, filled left-to-right
+	 * Builds a single sprite packing up to four group colors into a 2x2 grid, filled left-to-right
 	 * then top-to-bottom. The full two-row grid is centred vertically in the row's line box, so a
 	 * partial batch (one or two dots) sits on the top row rather than floating in the middle.
-	 * Colours are the friend's live group colours, so custom-picked colours render as-is.
+	 * Colors are the friend's live group colors, so custom-picked colors render as-is.
 	 */
 	private static BufferedImage createDotGrid(List<Integer> colors)
 	{
@@ -787,8 +800,8 @@ public class FriendGroupsPlugin extends Plugin
 				continue;
 			}
 
-			// Match on the tag-stripped text so a colour-wrapped "World 369" is caught, but keep
-			// the original (tagged) string when rewriting so the world keeps its colour.
+			// Match on the tag-stripped text so a color-wrapped "World 369" is caught, but keep
+			// the original (tagged) string when rewriting so the world keeps its color.
 			final String plain = Text.removeTags(text);
 			if (plain.length() > WORLD_PREFIX.length()
 				&& plain.startsWith(WORLD_PREFIX)
