@@ -79,7 +79,8 @@ public interface FriendGroupsConfig extends Config
 			position = 4,
 			keyName = "hideOffline",
 			name = "Hide offline friends",
-			description = "Hide offline friends from both the Friend Groups side panel and the in-game friends list."
+			description = "Hide offline friends from the in-game friends list. A group whose members are "
+			+ "all offline is hidden as a result."
 	)
 	default boolean hideOffline()
 	{

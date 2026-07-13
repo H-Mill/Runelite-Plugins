@@ -29,6 +29,7 @@ import com.google.inject.Provides;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -98,13 +99,18 @@ public class FriendGroupsPlugin extends Plugin
 	private static final String NEW_GROUP_PROMPT = "Group name<br>"
 		+ ColorUtil.prependColorTag("(limit " + FriendGroupManager.MAX_NAME_LENGTH + " characters)", new Color(0, 0, 170));
 
-	/** Sprite box for one dot; the swatch is centred in it so it lines up with the row text. */
-	private static final int DOT_WIDTH = 8;
-	private static final int DOT_HEIGHT = 11;
-	private static final int DOT_SIZE = 7;
+	/** One coloured square in the group grid, in pixels. Shrink or grow to taste. */
+	private static final int DOT_SIZE = 4;
+	/** Gap between squares in the grid. */
+	private static final int DOT_GAP = 1;
+	/** The grid is 2 wide; four groups fill one 2x2 block, further groups spill into more blocks. */
+	private static final int GRID_COLS = 2;
+	private static final int GRID_CELLS = GRID_COLS * GRID_COLS;
+	/** Sprite box height; the grid is centred in it so it lines up with the row text. */
+	private static final int DOT_BOX_HEIGHT = 11;
 
-	/** Cap, past which the row's dots outgrow the friends list column. */
-	private static final int MAX_DOTS = 4;
+	/** Cap on how many 2x2 grids a row shows, past which the dots outgrow the friends list column. */
+	private static final int MAX_GRIDS = 3;
 
 	/** Prefix the game puts before the world number in each online friend's row. */
 	private static final String WORLD_PREFIX = "World ";
@@ -158,8 +164,8 @@ public class FriendGroupsPlugin extends Plugin
 
 	private NavigationButton navButton;
 
-	/** Group color -> chat icon id. Client thread only. */
-	private final Map<Integer, Integer> dotIcons = new HashMap<>();
+	/** Ordered colours of one 2x2 grid batch (up to four) -> chat icon id. Client thread only. */
+	private final Map<List<Integer>, Integer> dotIcons = new HashMap<>();
 
 	private final Consumer<Boolean> groupsChangedListener = this::onGroupsChanged;
 
@@ -171,8 +177,8 @@ public class FriendGroupsPlugin extends Plugin
 	/** Normalized names of the current friends. Client thread only. */
 	private Set<String> friendKeys = Collections.emptySet();
 
-	/** Dots emitted for the row currently being laid out, so the x-shift matches the text. */
-	private int rowDots;
+	/** Pixel width added by the grid icon on the row being laid out, so the x-shift matches the text. */
+	private int rowDotShift;
 
 	@Provides
 	FriendGroupsConfig provideConfig(ConfigManager configManager)
@@ -248,7 +254,7 @@ public class FriendGroupsPlugin extends Plugin
 
 		navButton = null;
 		hoveredFriend = null;
-		rowDots = 0;
+		rowDotShift = 0;
 		friendWorlds = Collections.emptyMap();
 		friendKeys = Collections.emptySet();
 		playerWorld = 0;
@@ -336,10 +342,8 @@ public class FriendGroupsPlugin extends Plugin
 		}
 		else if ("hideOffline".equals(event.getKey()))
 		{
-			// Affects both the side panel and the in-game list. When turned off, the in-game
-			// rebuild redraws every friend (including the ones we had hidden) at their natural
-			// positions, restoring the normal list.
-			SwingUtilities.invokeLater(panel::rebuild);
+			// In-game list only. The rebuild redraws every friend (including ones we had hidden) at
+			// their natural positions before re-hiding, so turning it off restores the normal list.
 			refreshInGame();
 		}
 		else if ("inGameMarker".equals(event.getKey()))
@@ -534,11 +538,11 @@ public class FriendGroupsPlugin extends Plugin
 				decorateRow();
 				break;
 			case "friendsChatSetPosition":
-				if (rowDots > 0)
+				if (rowDotShift > 0)
 				{
 					final int[] intStack = client.getIntStack();
 					final int size = client.getIntStackSize();
-					intStack[size - 4] += (DOT_WIDTH + 1) * rowDots;
+					intStack[size - 4] += rowDotShift;
 				}
 				break;
 		}
@@ -550,7 +554,7 @@ public class FriendGroupsPlugin extends Plugin
 		final int size = client.getObjectStackSize();
 		final String rsn = (String) objectStack[size - 1];
 
-		rowDots = 0;
+		rowDotShift = 0;
 
 		// This callback is shared with the ignore and friends-chat lists, so rows for
 		// non-friends must be left alone.
@@ -560,34 +564,62 @@ public class FriendGroupsPlugin extends Plugin
 			return;
 		}
 
-		final List<FriendGroup> groups = manager.groupsFor(name);
-		if (groups.isEmpty())
+		final List<Integer> colors = dotColors(name);
+		if (colors.isEmpty())
 		{
 			return;
 		}
 
 		final StringBuilder text = new StringBuilder(rsn);
-		for (FriendGroup group : groups)
+		int shift = 0;
+		for (List<Integer> grid : dotGrids(colors))
 		{
-			if (rowDots >= MAX_DOTS)
-			{
-				break;
-			}
-
-			final int index = dotIconIndex(group.getColor());
+			final int index = dotIconIndex(grid);
 			if (index == -1)
 			{
-				continue;
+				// A sprite for this batch is not registered yet; a refresh will add it and redraw.
+				return;
 			}
 
 			text.append(" <img=").append(index).append('>');
-			rowDots++;
+			shift += gridWidth(grid.size()) + 1;
 		}
 
-		if (rowDots > 0)
+		objectStack[size - 1] = text.toString();
+		rowDotShift = shift;
+	}
+
+	/** Ordered group colours for a friend, capped at the grids a row shows; empty when ungrouped. */
+	private List<Integer> dotColors(String name)
+	{
+		final List<FriendGroup> groups = manager.groupsFor(name);
+		if (groups.isEmpty())
 		{
-			objectStack[size - 1] = text.toString();
+			return Collections.emptyList();
 		}
+
+		final int max = GRID_CELLS * MAX_GRIDS;
+		final List<Integer> colors = new ArrayList<>(Math.min(groups.size(), max));
+		for (FriendGroup group : groups)
+		{
+			if (colors.size() >= max)
+			{
+				break;
+			}
+			colors.add(group.getColor());
+		}
+		return colors;
+	}
+
+	/** Splits a friend's colours into successive 2x2 batches of up to four, each drawn as one sprite. */
+	private static List<List<Integer>> dotGrids(List<Integer> colors)
+	{
+		final List<List<Integer>> grids = new ArrayList<>((colors.size() + GRID_CELLS - 1) / GRID_CELLS);
+		for (int start = 0; start < colors.size(); start += GRID_CELLS)
+		{
+			grids.add(new ArrayList<>(colors.subList(start, Math.min(start + GRID_CELLS, colors.size()))));
+		}
+		return grids;
 	}
 
 	/**
@@ -648,34 +680,76 @@ public class FriendGroupsPlugin extends Plugin
 			.build();
 	}
 
-	/** @return true if at least one new icon was registered */
+	/**
+	 * Ensures a grid sprite exists for every 2x2 colour batch a grouped friend needs. Batches are
+	 * registered lazily (only what a friend's group membership actually uses), since the theoretical
+	 * set across all groups is combinatorial. Driven off the manager's stored memberships rather than
+	 * the live friend container, so the sprites exist as soon as the config loads - the container is
+	 * still empty for a tick or two after login.
+	 *
+	 * @return true if at least one new icon was registered
+	 */
 	private boolean registerDotIcons()
 	{
 		boolean registered = false;
+		final Set<String> seen = new HashSet<>();
 		for (FriendGroup group : manager.getGroups())
 		{
-			if (!dotIcons.containsKey(group.getColor()))
+			for (String member : group.getMembers())
 			{
-				dotIcons.put(group.getColor(), chatIconManager.registerChatIcon(createDot(group.getAwtColor())));
-				registered = true;
+				if (!seen.add(FriendGroupManager.key(member)))
+				{
+					continue;
+				}
+
+				for (List<Integer> grid : dotGrids(dotColors(member)))
+				{
+					if (!dotIcons.containsKey(grid))
+					{
+						dotIcons.put(grid, chatIconManager.registerChatIcon(createDotGrid(grid)));
+						registered = true;
+					}
+				}
 			}
 		}
 		return registered;
 	}
 
-	private int dotIconIndex(int color)
+	private int dotIconIndex(List<Integer> colors)
 	{
-		final Integer iconId = dotIcons.get(color);
+		final Integer iconId = dotIcons.get(colors);
 		return iconId == null ? -1 : chatIconManager.chatIconIndex(iconId);
 	}
 
-	private static BufferedImage createDot(Color color)
+	/** Horizontal advance of the grid sprite for {@code count} dots: one column for one dot, else two. */
+	private static int gridWidth(int count)
 	{
-		final BufferedImage image = new BufferedImage(DOT_WIDTH, DOT_HEIGHT, BufferedImage.TYPE_INT_ARGB);
+		final int cols = Math.min(count, GRID_COLS);
+		return cols * DOT_SIZE + (cols - 1) * DOT_GAP;
+	}
+
+	/**
+	 * Builds a single sprite packing up to four group colours into a 2x2 grid, filled left-to-right
+	 * then top-to-bottom. The full two-row grid is centred vertically in the row's line box, so a
+	 * partial batch (one or two dots) sits on the top row rather than floating in the middle.
+	 * Colours are the friend's live group colours, so custom-picked colours render as-is.
+	 */
+	private static BufferedImage createDotGrid(List<Integer> colors)
+	{
+		final int count = colors.size();
+
+		final BufferedImage image = new BufferedImage(gridWidth(count), DOT_BOX_HEIGHT, BufferedImage.TYPE_INT_ARGB);
 		final Graphics2D graphics = image.createGraphics();
+		final int gridHeight = GRID_COLS * DOT_SIZE + (GRID_COLS - 1) * DOT_GAP;
+		final int top = (DOT_BOX_HEIGHT - gridHeight) / 2;
 		// No antialiasing: the sprite is quantised to an indexed palette, and soft edges muddy it.
-		graphics.setColor(color);
-		graphics.fillRect(0, (DOT_HEIGHT - DOT_SIZE) / 2, DOT_SIZE, DOT_SIZE);
+		for (int i = 0; i < count; i++)
+		{
+			final int x = (i % GRID_COLS) * (DOT_SIZE + DOT_GAP);
+			final int y = top + (i / GRID_COLS) * (DOT_SIZE + DOT_GAP);
+			graphics.setColor(new Color(colors.get(i)));
+			graphics.fillRect(x, y, DOT_SIZE, DOT_SIZE);
+		}
 		graphics.dispose();
 		return image;
 	}

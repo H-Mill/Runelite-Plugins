@@ -143,7 +143,6 @@ class FriendGroupsPanel extends PluginPanel
 	}
 
 	private final FriendGroupManager manager;
-	private final FriendGroupsConfig config;
 	private final ColorPickerManager colorPickerManager;
 
 	private final JPanel content = new JPanel();
@@ -163,10 +162,9 @@ class FriendGroupsPanel extends PluginPanel
 	private Runnable onOpenConfig;
 
 	@Inject
-	FriendGroupsPanel(FriendGroupManager manager, FriendGroupsConfig config, ColorPickerManager colorPickerManager)
+	FriendGroupsPanel(FriendGroupManager manager, ColorPickerManager colorPickerManager)
 	{
 		this.manager = manager;
-		this.config = config;
 		this.colorPickerManager = colorPickerManager;
 
 		setLayout(new BorderLayout(0, 6));
@@ -293,7 +291,7 @@ class FriendGroupsPanel extends PluginPanel
 		final List<String> ungrouped = new ArrayList<>();
 		for (String name : friendNames)
 		{
-			if (!grouped.contains(FriendGroupManager.key(name)) && isVisible(name))
+			if (!grouped.contains(FriendGroupManager.key(name)))
 			{
 				ungrouped.add(name);
 			}
@@ -451,15 +449,12 @@ class FriendGroupsPanel extends PluginPanel
 
 			for (String member : members)
 			{
-				if (isVisible(member))
-				{
-					list.add(memberRow(member, name));
-				}
+				list.add(memberRow(member, name));
 			}
 
 			if (list.getComponentCount() == 0)
 			{
-				list.add(hint(members.isEmpty() ? "No friends in this group." : "All members offline."));
+				list.add(hint("No friends in this group."));
 			}
 			section.add(list, BorderLayout.CENTER);
 		}
@@ -708,11 +703,6 @@ class FriendGroupsPanel extends PluginPanel
 			return OFFLINE_COLOR;
 		}
 		return playerWorld > 0 && world != playerWorld ? OTHER_WORLD_COLOR : ONLINE_COLOR;
-	}
-
-	private boolean isVisible(String member)
-	{
-		return !config.hideOffline() || isOnline(member);
 	}
 
 	/**
