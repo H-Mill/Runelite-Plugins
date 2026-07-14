@@ -62,6 +62,7 @@ import net.runelite.api.events.RemovedFriend;
 import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.VarClientIntChanged;
+import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.Widget;
@@ -392,6 +393,33 @@ public class FriendGroupsPlugin extends Plugin
 			}
 			reorderer.reorder();
 		}
+	}
+
+	/**
+	 * Some content rebuilds the whole friends interface (group {@link InterfaceID#FRIENDS}) rather
+	 * than redrawing its rows: drinking from a Pool of Refreshment, for one, tears the interface
+	 * down and reloads it. That reload repaints the list in the game's default ungrouped order
+	 * <em>without</em> firing {@link ScriptID#FRIENDS_UPDATE}, so {@link #onScriptPostFired} never
+	 * runs and our layout is lost. Reapply it whenever the interface reloads.
+	 */
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event)
+	{
+		if (isFriendsInterfaceReload(event.getGroupId()))
+		{
+			refreshInGame();
+		}
+	}
+
+	/**
+	 * Whether a loaded interface group is the friends list. Its reload repaints the list in the
+	 * game's default order without firing {@link ScriptID#FRIENDS_UPDATE}, so our layout must be
+	 * reapplied - but only for this group: the ignore list ({@code InterfaceID.IGNORE}) and every
+	 * other interface share the same load event and must be left alone.
+	 */
+	static boolean isFriendsInterfaceReload(int groupId)
+	{
+		return groupId == InterfaceID.FRIENDS;
 	}
 
 	/**
