@@ -249,7 +249,10 @@ public class FriendGroupsPlugin extends Plugin
 	protected void shutDown() throws Exception
 	{
 		manager.removeListener(groupsChangedListener);
-		clientToolbar.removeNavigation(navButton);
+		if (navButton != null)
+		{
+			clientToolbar.removeNavigation(navButton);
+		}
 		overlayManager.remove(overlay);
 
 		navButton = null;
@@ -271,13 +274,23 @@ public class FriendGroupsPlugin extends Plugin
 		}
 	}
 
-	/** Re-adds the toolbar nav button so a changed {@link FriendGroupsConfig#sidePanelPriority()} takes effect live. */
+	/**
+	 * Re-adds the toolbar nav button so a changed {@link FriendGroupsConfig#sidePanelPriority()} takes
+	 * effect live, or removes it entirely when {@link FriendGroupsConfig#hideSidePanel()} is set.
+	 */
 	private void rebuildNavButton()
 	{
 		if (navButton != null)
 		{
 			clientToolbar.removeNavigation(navButton);
+			navButton = null;
 		}
+
+		if (config.hideSidePanel())
+		{
+			return;
+		}
+
 		navButton = NavigationButton.builder()
 			.tooltip("Friend Groups")
 			.icon(ImageUtil.loadImageResource(getClass(), "friend_groups_icon.png"))
@@ -336,7 +349,8 @@ public class FriendGroupsPlugin extends Plugin
 			return;
 		}
 
-		if (FriendGroupsConfig.SIDE_PANEL_PRIORITY.equals(event.getKey()))
+		if (FriendGroupsConfig.SIDE_PANEL_PRIORITY.equals(event.getKey())
+			|| FriendGroupsConfig.HIDE_SIDE_PANEL.equals(event.getKey()))
 		{
 			SwingUtilities.invokeLater(this::rebuildNavButton);
 		}

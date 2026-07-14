@@ -37,8 +37,22 @@ public interface FriendGroupsConfig extends Config
 
 	String SIDE_PANEL_PRIORITY = "sidePanelPriority";
 
+	String HIDE_SIDE_PANEL = "hideSidePanel";
+
 	@ConfigItem(
 			position = 1,
+			keyName = HIDE_SIDE_PANEL,
+			name = "Hide side panel icon",
+			description = "Remove the Friend Groups icon from the side panel. Groups can still be managed "
+			+ "from the in-game friends list right-click menu."
+	)
+	default boolean hideSidePanel()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+			position = 2,
 			keyName = SIDE_PANEL_PRIORITY,
 			name = "Side Panel Priority",
 			description = "Panel icon priority, Lower # = higher pos, Higher # = lower pos"
@@ -50,7 +64,7 @@ public interface FriendGroupsConfig extends Config
 	}
 
 	@ConfigItem(
-			position = 2,
+			position = 3,
 			keyName = "inGameMarker",
 			name = "In-game marker",
 			description = "How your friend groups are shown in the in-game friends list.<br>"
@@ -65,7 +79,7 @@ public interface FriendGroupsConfig extends Config
 	}
 
 	@ConfigItem(
-			position = 3,
+			position = 4,
 			keyName = "showTooltip",
 			name = "Hover tooltip",
 			description = "Show a friend's group names when hovering them in the in-game friends list"
@@ -76,7 +90,7 @@ public interface FriendGroupsConfig extends Config
 	}
 
 	@ConfigItem(
-			position = 4,
+			position = 5,
 			keyName = "hideOffline",
 			name = "Hide offline friends",
 			description = "Hide offline friends from the in-game friends list. A group whose members are "
@@ -88,7 +102,7 @@ public interface FriendGroupsConfig extends Config
 	}
 
 	@ConfigItem(
-			position = 5,
+			position = 6,
 			keyName = "hideWorldPrefix",
 			name = "Hide \"World\" prefix",
 			description = "In the in-game friends list, show just the world number (e.g. 369) instead of \"World 369\"."
