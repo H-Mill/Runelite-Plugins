@@ -402,7 +402,7 @@ class ListReorderer
 				}
 				else
 				{
-					cloneRow(list, row, rowY, clonePool);
+					cloneRow(list, row, rowY, rowHeight, clonePool);
 				}
 				slot++;
 			}
@@ -566,6 +566,7 @@ class ListReorderer
 				header.setAction(5, "Delete group");
 			}
 			header.setOnOpListener((JavaScriptCallback) e -> onHeaderOp(e.getOp(), group, collapsed));
+			forwardScroll(header, list, rowHeight);
 			header.revalidate();
 		}
 
@@ -675,7 +676,7 @@ class ListReorderer
 	 * (Message / Delete / Add ignore, plus this plugin's Assign group) acts on the same friend.
 	 * The small status icon is decorative and is not copied.
 	 */
-	private void cloneRow(Widget list, Row row, int newY, Deque<Widget> clonePool)
+	private void cloneRow(Widget list, Row row, int newY, int rowHeight, Deque<Widget> clonePool)
 	{
 		for (Widget src : row.widgets)
 		{
@@ -722,6 +723,7 @@ class ListReorderer
 				clone.setOnOpListener(onOp);
 				clone.setHasListener(true);
 				clone.setNoClickThrough(true);
+				forwardScroll(clone, list, rowHeight);
 			}
 			else
 			{
@@ -745,6 +747,26 @@ class ListReorderer
 		header.clearActions();
 		header.setHasListener(false);
 		header.revalidate();
+	}
+
+	/**
+	 * Makes the mouse wheel scroll the list while the cursor is over one of our injected,
+	 * listener-bearing widgets (a header or a cloned row). Such a widget captures the wheel and
+	 * would otherwise swallow it, freezing the scroll; forwarding it keeps scrolling continuous no
+	 * matter which of our widgets the cursor lands on as the list moves.
+	 */
+	private void forwardScroll(Widget widget, Widget list, int rowHeight)
+	{
+		widget.setOnScrollWheelListener((JavaScriptCallback) e -> scrollList(list, e.getMouseY() * rowHeight));
+	}
+
+	/** Scrolls the list by {@code delta} pixels and repositions its scrollbar handle to match. */
+	private void scrollList(Widget list, int delta)
+	{
+		final int max = Math.max(0, list.getScrollHeight() - list.getHeight());
+		final int y = Math.max(0, Math.min(list.getScrollY() + delta, max));
+		list.setScrollY(y);
+		client.runScript(ScriptID.UPDATE_SCROLLBAR, groupList.scrollbar, list.getId(), y);
 	}
 
 	private void updateScroll(Widget list, int contentHeight)
