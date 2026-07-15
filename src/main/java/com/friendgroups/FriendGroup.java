@@ -57,10 +57,10 @@ class FriendGroup
 
 	boolean contains(String friend)
 	{
-		final String key = FriendGroupManager.key(friend);
+		final String key = GroupStore.key(friend);
 		for (String member : members)
 		{
-			if (FriendGroupManager.key(member).equals(key))
+			if (GroupStore.key(member).equals(key))
 			{
 				return true;
 			}

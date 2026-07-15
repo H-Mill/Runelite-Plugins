@@ -25,7 +25,6 @@
  */
 package com.friendgroups;
 
-import java.util.Collections;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,13 +39,12 @@ import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
 
 /**
- * End-to-end coverage of the redraw-recovery chain behind the reported bug: content that rebuilds
- * the whole friends interface (a Pool of Refreshment being the case reported) drops the layout,
- * because the reload does not fire {@link ScriptID#FRIENDS_UPDATE}. Two links restore it:
+ * End-to-end coverage of the redraw-recovery chain behind the reported bug: content that rebuilds a
+ * whole social interface (a Pool of Refreshment being the case reported) drops the layout, because
+ * the reload does not fire the list's update script. Two links restore it, verified per list:
  * <ol>
- *   <li>a {@link net.runelite.api.events.WidgetLoaded} for the friends interface must run
- *       {@code FRIENDS_UPDATE}, and</li>
- *   <li>the resulting {@code FRIENDS_UPDATE} must drive {@link FriendListReorderer#reorder()}.</li>
+ *   <li>a {@link net.runelite.api.events.WidgetLoaded} for the interface must run its update script, and</li>
+ *   <li>the resulting update script must drive the matching {@link ListReorderer#reorder()}.</li>
  * </ol>
  * They are verified separately because the script call is a client-side cs2 script with no Java to
  * run under test, so it does not itself re-emit {@code ScriptPostFired}.
@@ -58,8 +56,7 @@ public class PoolReloadEndToEndTest extends PluginEndToEndHarness
 	public void friendsInterfaceReloadRunsFriendsUpdate()
 	{
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
-		// No stored groups, so no dot icons need registering and the list is rebuilt exactly once.
-		when(manager.getGroups()).thenReturn(Collections.emptyList());
+		stubStoresEmpty();
 		runClientThreadInline();
 
 		plugin.onWidgetLoaded(widgetLoaded(InterfaceID.FRIENDS));
@@ -68,13 +65,33 @@ public class PoolReloadEndToEndTest extends PluginEndToEndHarness
 	}
 
 	@Test
-	public void friendsUpdateScriptDrivesTheReorder()
+	public void ignoreInterfaceReloadRunsIgnoreUpdate()
 	{
-		when(config.hideWorldPrefix()).thenReturn(false);
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		stubStoresEmpty();
+		runClientThreadInline();
 
+		plugin.onWidgetLoaded(widgetLoaded(InterfaceID.IGNORE));
+
+		verifyIgnoreListRebuilt();
+	}
+
+	@Test
+	public void friendsUpdateScriptDrivesTheFriendReorder()
+	{
 		plugin.onScriptPostFired(new ScriptPostFired(ScriptID.FRIENDS_UPDATE));
 
-		verify(reorderer).reorder();
+		verify(friendReorderer).reorder();
+		verify(ignoreReorderer, never()).reorder();
+	}
+
+	@Test
+	public void ignoreUpdateScriptDrivesTheIgnoreReorder()
+	{
+		plugin.onScriptPostFired(new ScriptPostFired(ScriptID.IGNORE_UPDATE));
+
+		verify(ignoreReorderer).reorder();
+		verify(friendReorderer, never()).reorder();
 	}
 
 	@Test
@@ -89,12 +106,12 @@ public class PoolReloadEndToEndTest extends PluginEndToEndHarness
 	}
 
 	@Test
-	public void ignoreListReloadIsLeftAlone()
+	public void unrelatedInterfaceReloadIsLeftAlone()
 	{
-		plugin.onWidgetLoaded(widgetLoaded(InterfaceID.IGNORE));
+		plugin.onWidgetLoaded(widgetLoaded(InterfaceID.INVENTORY));
 
-		// The friends and ignore lists share the load event; only the friends one may trigger us.
-		verifyNoInteractions(client, clientThread, reorderer);
+		// Only the friends and ignore interfaces trigger a reapply; every other shares the load event.
+		verifyNoInteractions(client, clientThread, friendReorderer, ignoreReorderer);
 	}
 
 	@Test
@@ -102,6 +119,7 @@ public class PoolReloadEndToEndTest extends PluginEndToEndHarness
 	{
 		plugin.onScriptPostFired(new ScriptPostFired(ScriptID.FRIENDS_CHAT_CHANNEL_REBUILD));
 
-		verify(reorderer, never()).reorder();
+		verify(friendReorderer, never()).reorder();
+		verify(ignoreReorderer, never()).reorder();
 	}
 }

@@ -52,17 +52,17 @@ import org.mockito.stubbing.Answer;
 import net.runelite.client.config.ConfigManager;
 
 /**
- * Exercises the group model {@link FriendGroupManager} owns: create/rename/delete with the
+ * Exercises the group model {@link GroupStore} owns: create/rename/delete with the
  * dedup and cap rules, the membership index the menu and in-game paths read, friend rename and
  * removal migrations, the display ordering (including the movable Ungrouped section), and the
  * config round-trip. The {@link ConfigManager} is a Mockito stub backed by an in-memory map, so
  * writes really persist and a fresh manager loading the same map reconstructs the same state.
  */
-public class FriendGroupManagerStateTest
+public class GroupStoreStateTest
 {
 	private Map<String, Object> store;
 	private ConfigManager configManager;
-	private FriendGroupManager manager;
+	private GroupStore manager;
 
 	/**
 	 * A Mockito {@link ConfigManager} that reads and writes the given map, like the real thing.
@@ -107,9 +107,9 @@ public class FriendGroupManagerStateTest
 		return cm;
 	}
 
-	private FriendGroupManager loadFrom(Map<String, Object> store)
+	private GroupStore loadFrom(Map<String, Object> store)
 	{
-		final FriendGroupManager m = new FriendGroupManager(configBackedBy(store), new Gson());
+		final GroupStore m = new GroupStore(configBackedBy(store), new Gson(), GroupList.FRIENDS);
 		m.load();
 		return m;
 	}
@@ -129,7 +129,7 @@ public class FriendGroupManagerStateTest
 	{
 		store = new HashMap<>();
 		configManager = configBackedBy(store);
-		manager = new FriendGroupManager(configManager, new Gson());
+		manager = new GroupStore(configManager, new Gson(), GroupList.FRIENDS);
 		manager.load();
 	}
 
@@ -168,12 +168,12 @@ public class FriendGroupManagerStateTest
 	@Test
 	public void addGroupStopsAtTheCap()
 	{
-		for (int i = 0; i < FriendGroupManager.MAX_GROUPS; i++)
+		for (int i = 0; i < GroupStore.MAX_GROUPS; i++)
 		{
 			assertTrue(manager.addGroup("group" + i));
 		}
 		assertFalse(manager.addGroup("one too many"));
-		assertEquals(FriendGroupManager.MAX_GROUPS, manager.getGroups().size());
+		assertEquals(GroupStore.MAX_GROUPS, manager.getGroups().size());
 	}
 
 	@Test
@@ -397,7 +397,7 @@ public class FriendGroupManagerStateTest
 		manager.addGroup("B");
 		manager.addGroup("C");
 
-		manager.applyOrder(Arrays.asList("B", FriendGroupManager.UNGROUPED, "A", "C"));
+		manager.applyOrder(Arrays.asList("B", GroupStore.UNGROUPED, "A", "C"));
 
 		assertEquals(Arrays.asList("B", "A", "C"), groupNames());
 		assertEquals(1, manager.ungroupedPosition());
@@ -516,7 +516,7 @@ public class FriendGroupManagerStateTest
 		manager.setCollapsed("Skilling", true);
 		manager.moveUngrouped(-1);
 
-		final FriendGroupManager reloaded = loadFrom(store);
+		final GroupStore reloaded = loadFrom(store);
 
 		assertEquals(Arrays.asList("PvM", "Skilling"), reloaded.getGroups().stream()
 			.map(FriendGroup::getName).collect(Collectors.toList()));
@@ -542,7 +542,7 @@ public class FriendGroupManagerStateTest
 		store.put("groups", "[{\"name\":\"\",\"color\":1,\"members\":[]},"
 			+ "{\"name\":\"PvM\",\"color\":2,\"members\":[\"Zezima\"]}]");
 
-		final FriendGroupManager m = loadFrom(store);
+		final GroupStore m = loadFrom(store);
 
 		assertEquals(Arrays.asList("PvM"), m.getGroups().stream()
 			.map(FriendGroup::getName).collect(Collectors.toList()));
@@ -553,7 +553,7 @@ public class FriendGroupManagerStateTest
 	{
 		store.put("groups", "[{\"name\":\"PvM\",\"color\":2}]");
 
-		final FriendGroupManager m = loadFrom(store);
+		final GroupStore m = loadFrom(store);
 
 		assertEquals(1, m.getGroups().size());
 		assertTrue(m.getGroups().get(0).getMembers().isEmpty());
@@ -564,7 +564,7 @@ public class FriendGroupManagerStateTest
 	{
 		store.put("groups", "{ this is not valid json");
 
-		final FriendGroupManager m = loadFrom(store);
+		final GroupStore m = loadFrom(store);
 
 		assertTrue(m.getGroups().isEmpty());
 	}
@@ -572,7 +572,7 @@ public class FriendGroupManagerStateTest
 	@Test
 	public void loadWithNoStoredConfigStartsEmpty()
 	{
-		final FriendGroupManager m = loadFrom(new HashMap<>());
+		final GroupStore m = loadFrom(new HashMap<>());
 		assertTrue(m.getGroups().isEmpty());
 		assertFalse(m.isUngroupedCollapsed());
 		assertEquals(0, m.ungroupedPosition());
@@ -582,11 +582,51 @@ public class FriendGroupManagerStateTest
 	public void reloadedManagerCanBeMutatedFurther()
 	{
 		manager.addGroup("PvM");
-		final FriendGroupManager reloaded = loadFrom(store);
+		final GroupStore reloaded = loadFrom(store);
 		// The loaded list is the private working copy, not the immutable snapshot; a mutation
 		// through the API must still work (regression guard for load() wiring).
 		assertTrue(reloaded.renameGroup("PvM", "Bossing"));
 		assertEquals(new ArrayList<>(Arrays.asList("Bossing")), reloaded.getGroups().stream()
 			.map(FriendGroup::getName).collect(Collectors.toList()));
+	}
+
+	// ---- friends / ignore independence ----
+
+	@Test
+	public void friendsAndIgnoreStoresPersistIndependently()
+	{
+		// Two stores over one shared config map, keyed differently by their GroupList. A write to one
+		// must land under its own keys and never clobber the other.
+		final GroupStore friends = new GroupStore(configBackedBy(store), new Gson(), GroupList.FRIENDS);
+		final GroupStore ignore = new GroupStore(configBackedBy(store), new Gson(), GroupList.IGNORE);
+		friends.load();
+		ignore.load();
+
+		friends.addGroup("PvM");
+		friends.addMember("PvM", "Zezima");
+		ignore.addGroup("Spammers");
+		ignore.addMember("Spammers", "Bot123");
+
+		assertTrue(store.containsKey("groups"));
+		assertTrue(store.containsKey("ignoreGroups"));
+
+		// A fresh pair loaded from the same map reconstructs each list from only its own keys.
+		final GroupStore friends2 = new GroupStore(configBackedBy(store), new Gson(), GroupList.FRIENDS);
+		final GroupStore ignore2 = new GroupStore(configBackedBy(store), new Gson(), GroupList.IGNORE);
+		friends2.load();
+		ignore2.load();
+
+		assertEquals(Arrays.asList("PvM"), namesOf(friends2));
+		assertEquals(Arrays.asList("Spammers"), namesOf(ignore2));
+		// Membership does not leak across lists.
+		assertEquals(Arrays.asList("PvM"), friends2.groupsFor("Zezima").stream()
+			.map(FriendGroup::getName).collect(Collectors.toList()));
+		assertTrue(ignore2.groupsFor("Zezima").isEmpty());
+		assertTrue(friends2.groupsFor("Bot123").isEmpty());
+	}
+
+	private static List<String> namesOf(GroupStore store)
+	{
+		return store.getGroups().stream().map(FriendGroup::getName).collect(Collectors.toList());
 	}
 }

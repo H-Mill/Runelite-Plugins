@@ -25,7 +25,6 @@
  */
 package com.friendgroups;
 
-import java.util.Collections;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,23 +40,24 @@ import net.runelite.api.gameval.VarClientID;
 
 /**
  * End-to-end coverage of the everyday triggers that must (re)apply the in-game layout, driving the
- * real {@code @Subscribe} handlers:
+ * real {@code @Subscribe} handlers for both lists:
  * <ul>
- *   <li>the Name / Recent / World sort buttons, which redraw the list ungrouped and so need a
- *       forced rebuild in the cases {@link FriendGroupsPlugin#shouldRebuildOnSort} covers;</li>
- *   <li>config changes that alter the in-game view (marker mode, hide-offline, world prefix); and</li>
+ *   <li>the sort buttons, which redraw a list ungrouped and so need a forced rebuild in the cases
+ *       {@link FriendGroupsPlugin#shouldRebuildOnSort} covers;</li>
+ *   <li>config changes that alter an in-game view (each list's marker, plus friends-only hide-offline
+ *       and world prefix); and</li>
  *   <li>logging in.</li>
  * </ul>
- * These complement the pure-logic {@link SortRebuildTest} by proving the wiring from event to a
- * real {@code FRIENDS_UPDATE} run, not just the decision.
+ * These complement the pure-logic {@link SortRebuildTest} by proving the wiring from event to a real
+ * update-script run, not just the decision.
  */
 @RunWith(MockitoJUnitRunner.class)
 public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 {
-	// ---- sort buttons (VarClientIntChanged on FRIENDS_SORT) ----
+	// ---- sort buttons (VarClientIntChanged) ----
 
 	@Test
-	public void sortInGroupedModeRebuildsList()
+	public void friendsSortInGroupedModeRebuildsFriends()
 	{
 		when(config.inGameMarker()).thenReturn(InGameMarker.GROUPED);
 		when(config.hideOffline()).thenReturn(false);
@@ -70,10 +70,23 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 	}
 
 	@Test
-	public void sortWithDotsAndNoHideOfflineLeavesGameSortAlone()
+	public void ignoreSortInGroupedModeRebuildsIgnore()
+	{
+		when(config.ignoreInGameMarker()).thenReturn(InGameMarker.GROUPED);
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		runClientThreadInline();
+
+		plugin.onVarClientIntChanged(new VarClientIntChanged(VarClientID.IGNORE_SORT));
+
+		verifyIgnoreListRebuilt();
+	}
+
+	@Test
+	public void friendsSortWithDotsAndNoHideOfflineLeavesGameSortAlone()
 	{
 		when(config.inGameMarker()).thenReturn(InGameMarker.DOT);
 		when(config.hideOffline()).thenReturn(false);
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 
 		plugin.onVarClientIntChanged(new VarClientIntChanged(VarClientID.FRIENDS_SORT));
 
@@ -84,47 +97,64 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 	@Test
 	public void nonSortVarChangeIsIgnored()
 	{
-		plugin.onVarClientIntChanged(new VarClientIntChanged(VarClientID.FRIENDS_SORT + 1));
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 
-		verifyNoInteractions(client, clientThread, reorderer, config);
+		// A var that is neither list's sort var.
+		plugin.onVarClientIntChanged(new VarClientIntChanged(VarClientID.CHATCHANNEL_CURRENT_SORT));
+
+		verify(clientThread, never()).invokeLater(any(Runnable.class));
 	}
 
 	// ---- config changes ----
 
 	@Test
-	public void switchingMarkerOutOfGroupedRemovesHeadersThenRebuilds()
+	public void switchingFriendMarkerOutOfGroupedRemovesHeadersThenRebuilds()
 	{
 		when(config.inGameMarker()).thenReturn(InGameMarker.OFF);
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
-		when(manager.getGroups()).thenReturn(Collections.emptyList());
+		stubStoresEmpty();
 		runClientThreadInline();
 
 		plugin.onConfigChanged(configChanged(FriendGroupsConfig.GROUP, "inGameMarker"));
 
 		// Leaving grouped mode tears down the header rows before the list is drawn normally again.
-		verify(reorderer).removeHeaders();
+		verify(friendReorderer).removeHeaders();
 		verifyFriendsListRebuilt();
 	}
 
 	@Test
-	public void switchingMarkerToGroupedRebuildsWithoutRemovingHeaders()
+	public void switchingFriendMarkerToGroupedRebuildsWithoutRemovingHeaders()
 	{
 		when(config.inGameMarker()).thenReturn(InGameMarker.GROUPED);
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
-		when(manager.getGroups()).thenReturn(Collections.emptyList());
+		stubStoresEmpty();
 		runClientThreadInline();
 
 		plugin.onConfigChanged(configChanged(FriendGroupsConfig.GROUP, "inGameMarker"));
 
-		verify(reorderer, never()).removeHeaders();
+		verify(friendReorderer, never()).removeHeaders();
 		verifyFriendsListRebuilt();
 	}
 
 	@Test
-	public void hideOfflineChangeRebuilds()
+	public void switchingIgnoreMarkerOutOfGroupedRemovesHeadersThenRebuildsIgnore()
+	{
+		when(config.ignoreInGameMarker()).thenReturn(InGameMarker.OFF);
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		stubStoresEmpty();
+		runClientThreadInline();
+
+		plugin.onConfigChanged(configChanged(FriendGroupsConfig.GROUP, "ignoreInGameMarker"));
+
+		verify(ignoreReorderer).removeHeaders();
+		verifyIgnoreListRebuilt();
+	}
+
+	@Test
+	public void hideOfflineChangeRebuildsFriends()
 	{
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
-		when(manager.getGroups()).thenReturn(Collections.emptyList());
+		stubStoresEmpty();
 		runClientThreadInline();
 
 		plugin.onConfigChanged(configChanged(FriendGroupsConfig.GROUP, "hideOffline"));
@@ -133,10 +163,10 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 	}
 
 	@Test
-	public void hideWorldPrefixChangeRebuilds()
+	public void hideWorldPrefixChangeRebuildsFriends()
 	{
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
-		when(manager.getGroups()).thenReturn(Collections.emptyList());
+		stubStoresEmpty();
 		runClientThreadInline();
 
 		plugin.onConfigChanged(configChanged(FriendGroupsConfig.GROUP, "hideWorldPrefix"));
@@ -149,16 +179,16 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 	{
 		plugin.onConfigChanged(configChanged("some-other-plugin", "inGameMarker"));
 
-		verifyNoInteractions(client, clientThread, reorderer);
+		verifyNoInteractions(client, clientThread, friendReorderer, ignoreReorderer);
 	}
 
 	// ---- login ----
 
 	@Test
-	public void loginReappliesTheLayout()
+	public void loginReappliesBothLayouts()
 	{
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
-		when(manager.getGroups()).thenReturn(Collections.emptyList());
+		stubStoresEmpty();
 		runClientThreadInline();
 
 		final GameStateChanged event = new GameStateChanged();
@@ -166,5 +196,6 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 		plugin.onGameStateChanged(event);
 
 		verifyFriendsListRebuilt();
+		verifyIgnoreListRebuilt();
 	}
 }

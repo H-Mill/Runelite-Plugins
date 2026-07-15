@@ -36,14 +36,13 @@ import net.runelite.client.ui.overlay.tooltip.TooltipManager;
 import net.runelite.client.util.ColorUtil;
 
 /**
- * Names the groups of the friend currently hovered in the in-game friends list.
+ * Names the groups of the friend or ignored player currently hovered in-game.
  * The row itself can only carry colored dots, so the names live here.
  */
 class FriendGroupsOverlay extends Overlay
 {
 	private final Client client;
 	private final FriendGroupsPlugin plugin;
-	private final FriendGroupManager manager;
 	private final FriendGroupsConfig config;
 	private final TooltipManager tooltipManager;
 
@@ -51,13 +50,11 @@ class FriendGroupsOverlay extends Overlay
 	private FriendGroupsOverlay(
 		Client client,
 		FriendGroupsPlugin plugin,
-		FriendGroupManager manager,
 		FriendGroupsConfig config,
 		TooltipManager tooltipManager)
 	{
 		this.client = client;
 		this.plugin = plugin;
-		this.manager = manager;
 		this.config = config;
 		this.tooltipManager = tooltipManager;
 	}
@@ -70,13 +67,7 @@ class FriendGroupsOverlay extends Overlay
 			return null;
 		}
 
-		final String hovered = plugin.getHoveredFriend();
-		if (hovered == null)
-		{
-			return null;
-		}
-
-		final List<FriendGroup> groups = manager.groupsFor(hovered);
+		final List<FriendGroup> groups = plugin.hoveredGroups();
 		if (groups.isEmpty())
 		{
 			return null;

@@ -25,6 +25,7 @@
  */
 package com.friendgroups;
 
+import com.google.gson.Gson;
 import com.google.inject.Provides;
 import java.awt.Color;
 import java.awt.Graphics2D;
@@ -40,18 +41,19 @@ import java.util.Set;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Named;
+import javax.inject.Singleton;
 import javax.swing.SwingUtilities;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.Friend;
 import net.runelite.api.FriendContainer;
 import net.runelite.api.GameState;
+import net.runelite.api.Ignore;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Nameable;
+import net.runelite.api.NameableContainer;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameStateChanged;
@@ -60,11 +62,11 @@ import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.NameableNameChanged;
 import net.runelite.api.events.RemovedFriend;
 import net.runelite.api.events.ScriptCallbackEvent;
+import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.VarClientIntChanged;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
-import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetUtil;
 import net.runelite.client.callback.ClientThread;
@@ -79,6 +81,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.ui.overlay.OverlayMenuEntry;
@@ -89,8 +92,8 @@ import net.runelite.client.util.Text;
 @Slf4j
 @PluginDescriptor(
 		name = "Friend Groups",
-		description = "Organise your friends list into named, re-orderable groups",
-		tags = {"friend", "friends", "group", "groups", "social", "list"},
+		description = "Organise your friends and ignore lists into named, re-orderable groups",
+		tags = {"friend", "friends", "ignore", "group", "groups", "social", "list"},
 		configName = "FriendGroups"
 )
 public class FriendGroupsPlugin extends Plugin
@@ -98,7 +101,7 @@ public class FriendGroupsPlugin extends Plugin
 	private static final String ASSIGN_GROUP = "Assign group";
 	private static final String NEW_GROUP = "New group...";
 	private static final String NEW_GROUP_PROMPT = "Group name<br>"
-		+ ColorUtil.prependColorTag("(limit " + FriendGroupManager.MAX_NAME_LENGTH + " characters)", new Color(0, 0, 170));
+		+ ColorUtil.prependColorTag("(limit " + GroupStore.MAX_NAME_LENGTH + " characters)", new Color(0, 0, 170));
 
 	/** One colored square in the group grid, in pixels. Shrink or grow to taste. */
 	private static final int DOT_SIZE = 4;
@@ -110,7 +113,7 @@ public class FriendGroupsPlugin extends Plugin
 	/** Sprite box height; the grid is centred in it so it lines up with the row text. */
 	private static final int DOT_BOX_HEIGHT = 11;
 
-	/** Cap on how many 2x2 grids a row shows, past which the dots outgrow the friends list column. */
+	/** Cap on how many 2x2 grids a row shows, past which the dots outgrow the list column. */
 	private static final int MAX_GRIDS = 3;
 
 	/** Prefix the game puts before the world number in each online friend's row. */
@@ -129,7 +132,12 @@ public class FriendGroupsPlugin extends Plugin
 	private ConfigManager configManager;
 
 	@Inject
-	private FriendGroupManager manager;
+	@Named("friendGroups")
+	private GroupStore friendStore;
+
+	@Inject
+	@Named("ignoreGroups")
+	private GroupStore ignoreStore;
 
 	@Inject
 	private FriendGroupsPanel panel;
@@ -153,30 +161,47 @@ public class FriendGroupsPlugin extends Plugin
 	private EventBus eventBus;
 
 	@Inject
-	private FriendListReorderer reorderer;
+	@Named("friendList")
+	private ListReorderer friendReorderer;
+
+	@Inject
+	@Named("ignoreList")
+	private ListReorderer ignoreReorderer;
 
 	@Inject
 	@Named("developerMode")
 	private boolean developerMode;
 
-	/** Friend hovered in the in-game friends list, or null. Read by the overlay. */
-	@Getter
-	private String hoveredFriend;
+	/** Name hovered in an in-game list, or null; paired with {@link #hoveredList}. Read by the overlay. */
+	private String hoveredName;
+	private GroupList hoveredList;
 
 	private NavigationButton navButton;
 
 	/** Ordered colors of one 2x2 grid batch (up to four) -> chat icon id. Client thread only. */
 	private final Map<List<Integer>, Integer> dotIcons = new HashMap<>();
 
-	private final Consumer<Boolean> groupsChangedListener = this::onGroupsChanged;
+	private final Consumer<Boolean> friendListener = dirty -> onGroupsChanged(GroupList.FRIENDS, dirty);
+	private final Consumer<Boolean> ignoreListener = dirty -> onGroupsChanged(GroupList.IGNORE, dirty);
 
 	private Map<String, Integer> friendWorlds = Collections.emptyMap();
 
 	/** Our own world last pushed to the panel, so a hop re-colors friends by same/other world. */
 	private int playerWorld;
 
-	/** Normalized names of the current friends. Client thread only. */
+	/** Normalized names of the current friends / ignores. Client thread only. */
 	private Set<String> friendKeys = Collections.emptySet();
+	private Set<String> ignoreKeys = Collections.emptySet();
+
+	/** Display names of the current ignores, to detect changes (the ignore list carries no world). */
+	private List<String> ignoreNames = Collections.emptyList();
+
+	/**
+	 * Which list's build script is currently running, so the shared row-decoration callback (fired
+	 * for the friends, ignore and friends-chat lists alike) decorates using the right list's store.
+	 * Set from {@link #onScriptPreFired}. Client thread only.
+	 */
+	private GroupList activeList = GroupList.FRIENDS;
 
 	/** Pixel width added by the grid icon on the row being laid out, so the x-shift matches the text. */
 	private int rowDotShift;
@@ -187,10 +212,63 @@ public class FriendGroupsPlugin extends Plugin
 		return configManager.getConfig(FriendGroupsConfig.class);
 	}
 
+	@Provides
+	@Singleton
+	@Named("friendGroups")
+	GroupStore provideFriendStore(ConfigManager configManager, Gson gson)
+	{
+		return new GroupStore(configManager, gson, GroupList.FRIENDS);
+	}
+
+	@Provides
+	@Singleton
+	@Named("ignoreGroups")
+	GroupStore provideIgnoreStore(ConfigManager configManager, Gson gson)
+	{
+		return new GroupStore(configManager, gson, GroupList.IGNORE);
+	}
+
+	@Provides
+	@Singleton
+	@Named("friendList")
+	ListReorderer provideFriendReorderer(Client client, ClientThread clientThread,
+		@Named("friendGroups") GroupStore store, FriendGroupsConfig config,
+		ChatboxPanelManager chatboxPanelManager, ColorPickerManager colorPickerManager)
+	{
+		return new ListReorderer(client, clientThread, store, config, chatboxPanelManager, colorPickerManager,
+			GroupList.FRIENDS);
+	}
+
+	@Provides
+	@Singleton
+	@Named("ignoreList")
+	ListReorderer provideIgnoreReorderer(Client client, ClientThread clientThread,
+		@Named("ignoreGroups") GroupStore store, FriendGroupsConfig config,
+		ChatboxPanelManager chatboxPanelManager, ColorPickerManager colorPickerManager)
+	{
+		return new ListReorderer(client, clientThread, store, config, chatboxPanelManager, colorPickerManager,
+			GroupList.IGNORE);
+	}
+
+	private GroupStore storeFor(GroupList list)
+	{
+		return list == GroupList.FRIENDS ? friendStore : ignoreStore;
+	}
+
+	private ListReorderer reordererFor(GroupList list)
+	{
+		return list == GroupList.FRIENDS ? friendReorderer : ignoreReorderer;
+	}
+
+	private Set<String> keysFor(GroupList list)
+	{
+		return list == GroupList.FRIENDS ? friendKeys : ignoreKeys;
+	}
+
 	/**
 	 * Carries retired config keys onto their replacements so a user's saved choices survive
 	 * rather than silently resetting. Each runs once: the old key is unset afterwards, so later
-	 * starts skip it.
+	 * starts skip it. Applies to the friends list only (the ignore list is new).
 	 * <ul>
 	 *   <li>{@code reorderInGame} (boolean) -&gt; the {@link InGameMarker#GROUPED} marker mode.</li>
 	 *   <li>{@code showOffline} (boolean) -&gt; its inverse, {@code hideOffline}.</li>
@@ -230,8 +308,10 @@ public class FriendGroupsPlugin extends Plugin
 	protected void startUp() throws Exception
 	{
 		migrateConfig();
-		manager.load();
-		manager.addListener(groupsChangedListener);
+		friendStore.load();
+		ignoreStore.load();
+		friendStore.addListener(friendListener);
+		ignoreStore.addListener(ignoreListener);
 
 		rebuildNavButton();
 		overlayManager.add(overlay);
@@ -241,15 +321,18 @@ public class FriendGroupsPlugin extends Plugin
 		SwingUtilities.invokeLater(() ->
 		{
 			panel.setLoggedIn(loggedIn);
-			panel.rebuild();
+			panel.rebuildAll();
 		});
-		refreshInGame();
+
+		refreshInGame(GroupList.FRIENDS);
+		refreshInGame(GroupList.IGNORE);
 	}
 
 	@Override
 	protected void shutDown() throws Exception
 	{
-		manager.removeListener(groupsChangedListener);
+		friendStore.removeListener(friendListener);
+		ignoreStore.removeListener(ignoreListener);
 		if (navButton != null)
 		{
 			clientToolbar.removeNavigation(navButton);
@@ -257,20 +340,25 @@ public class FriendGroupsPlugin extends Plugin
 		overlayManager.remove(overlay);
 
 		navButton = null;
-		hoveredFriend = null;
+		hoveredName = null;
+		hoveredList = null;
 		rowDotShift = 0;
 		friendWorlds = Collections.emptyMap();
 		friendKeys = Collections.emptySet();
+		ignoreKeys = Collections.emptySet();
+		ignoreNames = Collections.emptyList();
 		playerWorld = 0;
 
-		// Redraw without our decorations. ChatIconManager has no way to drop the dot
+		// Redraw both lists without our decorations. ChatIconManager has no way to drop the dot
 		// icons we registered, so they are deliberately left behind for a later start.
 		if (client.getGameState() == GameState.LOGGED_IN)
 		{
 			clientThread.invokeLater(() ->
 			{
-				reorderer.removeHeaders();
-				rebuildFriendsList();
+				friendReorderer.removeHeaders();
+				ignoreReorderer.removeHeaders();
+				rebuildList(GroupList.FRIENDS);
+				rebuildList(GroupList.IGNORE);
 			});
 		}
 	}
@@ -327,16 +415,20 @@ public class FriendGroupsPlugin extends Plugin
 		{
 			case LOGGED_IN:
 				SwingUtilities.invokeLater(() -> panel.setLoggedIn(true));
-				refreshInGame();
+				refreshInGame(GroupList.FRIENDS);
+				refreshInGame(GroupList.IGNORE);
 				break;
 			case LOGIN_SCREEN:
 				friendWorlds = Collections.emptyMap();
 				friendKeys = Collections.emptySet();
+				ignoreKeys = Collections.emptySet();
+				ignoreNames = Collections.emptyList();
 				playerWorld = 0;
 				SwingUtilities.invokeLater(() ->
 				{
 					panel.setLoggedIn(false);
 					panel.setFriends(Collections.emptyMap(), 0);
+					panel.setIgnores(Collections.emptyList());
 				});
 				break;
 		}
@@ -355,32 +447,35 @@ public class FriendGroupsPlugin extends Plugin
 		{
 			SwingUtilities.invokeLater(this::rebuildNavButton);
 		}
-		else if ("hideOffline".equals(event.getKey()))
+		else if ("hideOffline".equals(event.getKey()) || "hideWorldPrefix".equals(event.getKey()))
 		{
-			// In-game list only. The rebuild redraws every friend (including ones we had hidden) at
-			// their natural positions before re-hiding, so turning it off restores the normal list.
-			refreshInGame();
+			// Friends list only. The rebuild redraws every friend (including ones we had hidden) at
+			// their natural positions before re-hiding, and re-strips (or restores) the world column.
+			refreshInGame(GroupList.FRIENDS);
 		}
 		else if ("inGameMarker".equals(event.getKey()))
 		{
-			// Leaving grouped mode: drop the header rows before the list is drawn normally again.
-			if (config.inGameMarker() != InGameMarker.GROUPED)
-			{
-				clientThread.invokeLater(reorderer::removeHeaders);
-			}
-			refreshInGame();
+			onMarkerChanged(GroupList.FRIENDS);
 		}
-		else if ("hideWorldPrefix".equals(event.getKey()))
+		else if ("ignoreInGameMarker".equals(event.getKey()))
 		{
-			// Redraw so the world column is re-stripped, or restored to "World nnn" when turned off.
-			refreshInGame();
+			onMarkerChanged(GroupList.IGNORE);
 		}
 	}
 
+	/** Leaving grouped mode drops the header rows before the list is drawn normally again. */
+	private void onMarkerChanged(GroupList list)
+	{
+		if (list.marker(config) != InGameMarker.GROUPED)
+		{
+			clientThread.invokeLater(reordererFor(list)::removeHeaders);
+		}
+		refreshInGame(list);
+	}
+
 	/**
-	 * The friends list has finished (re)building, so its row widgets exist and can be
-	 * regrouped. This fires whenever the list is drawn - opening the tab, a friend's
-	 * status changing, or our own {@link #rebuildFriendsList()}.
+	 * A list has finished (re)building, so its row widgets exist and can be regrouped. This fires
+	 * whenever a list is drawn - opening the tab, a member's status changing, or our own rebuild.
 	 */
 	@Subscribe
 	public void onScriptPostFired(ScriptPostFired event)
@@ -391,52 +486,86 @@ public class FriendGroupsPlugin extends Plugin
 			{
 				stripWorldPrefixes();
 			}
-			reorderer.reorder();
+			friendReorderer.reorder();
+		}
+		else if (event.getScriptId() == ScriptID.IGNORE_UPDATE)
+		{
+			ignoreReorderer.reorder();
 		}
 	}
 
 	/**
-	 * Some content rebuilds the whole friends interface (group {@link InterfaceID#FRIENDS}) rather
-	 * than redrawing its rows: drinking from a Pool of Refreshment, for one, tears the interface
-	 * down and reloads it. That reload repaints the list in the game's default ungrouped order
-	 * <em>without</em> firing {@link ScriptID#FRIENDS_UPDATE}, so {@link #onScriptPostFired} never
-	 * runs and our layout is lost. Reapply it whenever the interface reloads.
+	 * Records which list's build script is running, so the shared decoration callback picks the
+	 * right store. Fires just before {@link #onScriptPostFired} for the same script.
+	 */
+	@Subscribe
+	public void onScriptPreFired(ScriptPreFired event)
+	{
+		if (event.getScriptId() == ScriptID.FRIENDS_UPDATE)
+		{
+			activeList = GroupList.FRIENDS;
+		}
+		else if (event.getScriptId() == ScriptID.IGNORE_UPDATE)
+		{
+			activeList = GroupList.IGNORE;
+		}
+	}
+
+	/**
+	 * Some content rebuilds a whole social interface (e.g. {@link InterfaceID#FRIENDS}) rather than
+	 * redrawing its rows: drinking from a Pool of Refreshment, for one, tears the interface down and
+	 * reloads it. That reload repaints the list in the game's default ungrouped order <em>without</em>
+	 * firing the list's update script, so {@link #onScriptPostFired} never runs and our layout is lost.
+	 * Reapply it whenever the friends or ignore interface reloads.
 	 */
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		if (isFriendsInterfaceReload(event.getGroupId()))
+		final GroupList list = reloadedList(event.getGroupId());
+		if (list != null)
 		{
-			refreshInGame();
+			refreshInGame(list);
 		}
 	}
 
 	/**
-	 * Whether a loaded interface group is the friends list. Its reload repaints the list in the
-	 * game's default order without firing {@link ScriptID#FRIENDS_UPDATE}, so our layout must be
-	 * reapplied - but only for this group: the ignore list ({@code InterfaceID.IGNORE}) and every
-	 * other interface share the same load event and must be left alone.
+	 * The list whose interface just loaded, or null for any other interface. Both the friends and
+	 * ignore interfaces repaint on reload without firing their update script, so both need our layout
+	 * reapplied; every other interface shares the same load event and must be left alone.
 	 */
-	static boolean isFriendsInterfaceReload(int groupId)
+	static GroupList reloadedList(int groupId)
 	{
-		return groupId == InterfaceID.FRIENDS;
+		for (GroupList list : GroupList.values())
+		{
+			if (list.interfaceGroup == groupId)
+			{
+				return list;
+			}
+		}
+		return null;
 	}
 
 	/**
-	 * The Name / Recent / World / Legacy sort buttons change {@link VarClientID#FRIENDS_SORT}
-	 * and redraw the list ungrouped, without re-applying our layout. Force a clean
-	 * {@link ScriptID#FRIENDS_UPDATE} so the reorder re-runs from the freshly sorted rows:
-	 * in grouped mode this re-clusters them, and with hide-offline on it re-hides the offline
-	 * rows the sort redrew - otherwise they reappear.
+	 * The Name / Recent / World / Legacy sort buttons change the list's sort var and redraw it
+	 * ungrouped, without re-applying our layout. Force a clean rebuild so the reorder re-runs from the
+	 * freshly sorted rows: in grouped mode this re-clusters them, and with hide-offline on it re-hides
+	 * the offline rows the sort redrew - otherwise they reappear.
 	 */
 	@Subscribe
 	public void onVarClientIntChanged(VarClientIntChanged event)
 	{
-		if (event.getIndex() == VarClientID.FRIENDS_SORT
-			&& shouldRebuildOnSort(config.inGameMarker(), config.hideOffline())
-			&& client.getGameState() == GameState.LOGGED_IN)
+		if (client.getGameState() != GameState.LOGGED_IN)
 		{
-			clientThread.invokeLater(this::rebuildFriendsList);
+			return;
+		}
+
+		for (GroupList list : GroupList.values())
+		{
+			if (event.getIndex() == list.sortVar && shouldRebuildOnSort(list.marker(config), list.hideOffline(config)))
+			{
+				clientThread.invokeLater(() -> rebuildList(list));
+				return;
+			}
 		}
 	}
 
@@ -456,17 +585,27 @@ public class FriendGroupsPlugin extends Plugin
 	{
 		if (developerMode && "fgdump".equals(event.getCommand()))
 		{
-			clientThread.invokeLater(reorderer::dumpLayout);
+			clientThread.invokeLater(() ->
+			{
+				friendReorderer.dumpLayout();
+				ignoreReorderer.dumpLayout();
+			});
 		}
 	}
 
 	/**
-	 * There is no event for a friend coming online or being added, so the panel's
-	 * view of the friends list is polled. The container holds at most a few hundred
-	 * entries and this runs once per tick, off the render path.
+	 * There is no event for a friend/ignore coming online or being added, so the panel's view of both
+	 * lists is polled. Each container holds at most a few hundred entries and this runs once per tick,
+	 * off the render path.
 	 */
 	@Subscribe
 	public void onGameTick(GameTick event)
+	{
+		pollFriends();
+		pollIgnores();
+	}
+
+	private void pollFriends()
 	{
 		final FriendContainer container = client.getFriendContainer();
 		if (container == null)
@@ -497,7 +636,7 @@ public class FriendGroupsPlugin extends Plugin
 			final Set<String> keys = new HashSet<>();
 			for (String name : current.keySet())
 			{
-				keys.add(FriendGroupManager.key(name));
+				keys.add(GroupStore.key(name));
 			}
 			friendKeys = keys;
 
@@ -505,18 +644,74 @@ public class FriendGroupsPlugin extends Plugin
 		}
 	}
 
+	private void pollIgnores()
+	{
+		final NameableContainer<? extends Nameable> container = client.getIgnoreContainer();
+		if (container == null)
+		{
+			return;
+		}
+
+		final List<String> current = new ArrayList<>();
+		final Nameable[] members = container.getMembers();
+		if (members != null)
+		{
+			for (Nameable member : members)
+			{
+				if (member != null && member.getName() != null)
+				{
+					current.add(member.getName());
+				}
+			}
+		}
+
+		if (current.equals(ignoreNames))
+		{
+			return;
+		}
+
+		final Set<String> keys = new HashSet<>();
+		for (String name : current)
+		{
+			keys.add(GroupStore.key(name));
+		}
+
+		// Drop group membership for players who were un-ignored (there is no RemovedIgnore event).
+		// Only prune against a non-empty container, so a transient empty read never wipes memberships.
+		if (!keys.isEmpty())
+		{
+			for (String oldKey : ignoreKeys)
+			{
+				if (!keys.contains(oldKey))
+				{
+					ignoreStore.forgetFriend(oldKey);
+				}
+			}
+		}
+
+		ignoreNames = current;
+		ignoreKeys = keys;
+
+		final List<String> forPanel = new ArrayList<>(current);
+		SwingUtilities.invokeLater(() -> panel.setIgnores(forPanel));
+	}
+
 	@Subscribe
 	public void onMenuEntryAdded(MenuEntryAdded event)
 	{
 		final int groupId = WidgetUtil.componentToInterface(event.getActionParam1());
-		if (groupId != InterfaceID.FRIENDS || !event.getOption().equals("Message"))
+		final GroupList list = reloadedList(groupId);
+		if (list == null || !event.getOption().equals(list.anchorOption))
 		{
-			hoveredFriend = null;
+			hoveredName = null;
+			hoveredList = null;
 			return;
 		}
 
-		final String friend = friendFromTarget(event.getTarget());
-		hoveredFriend = friend;
+		final GroupStore store = storeFor(list);
+		final String name = friendFromTarget(event.getTarget());
+		hoveredName = name;
+		hoveredList = list;
 
 		final MenuEntry parent = client.getMenu().createMenuEntry(-1)
 			.setOption(ASSIGN_GROUP)
@@ -528,12 +723,12 @@ public class FriendGroupsPlugin extends Plugin
 		// Menu entries are rebuilt every frame while hovering, so resolve membership
 		// through the index rather than scanning each group's member list.
 		final Set<String> memberOf = new HashSet<>();
-		for (FriendGroup group : manager.groupsFor(friend))
+		for (FriendGroup group : store.groupsFor(name))
 		{
 			memberOf.add(group.getName());
 		}
 
-		for (FriendGroup group : manager.getGroups())
+		for (FriendGroup group : store.getGroups())
 		{
 			final String groupName = group.getName();
 			final boolean member = memberOf.contains(groupName);
@@ -546,11 +741,11 @@ public class FriendGroupsPlugin extends Plugin
 				{
 					if (member)
 					{
-						manager.removeMember(groupName, friend);
+						store.removeMember(groupName, name);
 					}
 					else
 					{
-						manager.addMember(groupName, friend);
+						store.addMember(groupName, name);
 					}
 				});
 		}
@@ -558,22 +753,31 @@ public class FriendGroupsPlugin extends Plugin
 		submenu.createMenuEntry(-1)
 			.setOption(NEW_GROUP)
 			.setType(MenuAction.RUNELITE)
-			.onClick(e -> promptNewGroup(friend));
+			.onClick(e -> promptNewGroup(store, name));
 	}
 
 	@Subscribe
 	public void onRemovedFriend(RemovedFriend event)
 	{
-		manager.forgetFriend(event.getNameable().getName());
+		friendStore.forgetFriend(event.getNameable().getName());
 	}
 
 	@Subscribe
 	public void onNameableNameChanged(NameableNameChanged event)
 	{
 		final Nameable nameable = event.getNameable();
-		if (nameable instanceof Friend && nameable.getPrevName() != null)
+		if (nameable.getPrevName() == null)
 		{
-			manager.renameFriend(nameable.getPrevName(), nameable.getName());
+			return;
+		}
+
+		if (nameable instanceof Friend)
+		{
+			friendStore.renameFriend(nameable.getPrevName(), nameable.getName());
+		}
+		else if (nameable instanceof Ignore)
+		{
+			ignoreStore.renameFriend(nameable.getPrevName(), nameable.getName());
 		}
 	}
 
@@ -581,8 +785,9 @@ public class FriendGroupsPlugin extends Plugin
 	public void onScriptCallbackEvent(ScriptCallbackEvent event)
 	{
 		// Only 'Colored dots' decorates individual rows. 'Off' does nothing, and 'Grouped list'
-		// clusters the list under group headers that already convey membership.
-		if (config.inGameMarker() != InGameMarker.DOT)
+		// clusters the list under group headers that already convey membership. The marker is that
+		// of the list whose build script is running (see activeList).
+		if (activeList.marker(config) != InGameMarker.DOT)
 		{
 			return;
 		}
@@ -611,15 +816,15 @@ public class FriendGroupsPlugin extends Plugin
 
 		rowDotShift = 0;
 
-		// This callback is shared with the ignore and friends-chat lists, so rows for
-		// non-friends must be left alone.
+		// This callback is shared across the friends, ignore and friends-chat lists, so rows that are
+		// not a member of the list currently building must be left alone.
 		final String name = Text.toJagexName(Text.removeTags(rsn));
-		if (!friendKeys.contains(FriendGroupManager.key(name)))
+		if (!keysFor(activeList).contains(GroupStore.key(name)))
 		{
 			return;
 		}
 
-		final List<Integer> colors = dotColors(name);
+		final List<Integer> colors = dotColors(storeFor(activeList), name);
 		if (colors.isEmpty())
 		{
 			return;
@@ -644,10 +849,10 @@ public class FriendGroupsPlugin extends Plugin
 		rowDotShift = shift;
 	}
 
-	/** Ordered group colors for a friend, capped at the grids a row shows; empty when ungrouped. */
-	private List<Integer> dotColors(String name)
+	/** Ordered group colors for a member, capped at the grids a row shows; empty when ungrouped. */
+	private List<Integer> dotColors(GroupStore store, String name)
 	{
-		final List<FriendGroup> groups = manager.groupsFor(name);
+		final List<FriendGroup> groups = store.groupsFor(name);
 		if (groups.isEmpty())
 		{
 			return Collections.emptyList();
@@ -666,7 +871,7 @@ public class FriendGroupsPlugin extends Plugin
 		return colors;
 	}
 
-	/** Splits a friend's colors into successive 2x2 batches of up to four, each drawn as one sprite. */
+	/** Splits a member's colors into successive 2x2 batches of up to four, each drawn as one sprite. */
 	private static List<List<Integer>> dotGrids(List<Integer> colors)
 	{
 		final List<List<Integer>> grids = new ArrayList<>((colors.size() + GRID_CELLS - 1) / GRID_CELLS);
@@ -678,26 +883,26 @@ public class FriendGroupsPlugin extends Plugin
 	}
 
 	/**
-	 * Reads a friend's name out of a friends list menu target. Friends list entries carry color
-	 * tags for online status, and 'Colored dots' appends an {@code <img>} icon; a RuneScape name
-	 * holds neither, so stripping the tags leaves the name.
+	 * Reads a member's name out of a list menu target. Rows carry color tags for online status, and
+	 * 'Colored dots' appends an {@code <img>} icon; a RuneScape name holds neither, so stripping the
+	 * tags leaves the name.
 	 */
 	static String friendFromTarget(String target)
 	{
 		return Text.toJagexName(Text.removeTags(target));
 	}
 
-	private void onGroupsChanged(boolean inGameDirty)
+	private void onGroupsChanged(GroupList list, boolean inGameDirty)
 	{
-		SwingUtilities.invokeLater(panel::rebuild);
+		SwingUtilities.invokeLater(() -> panel.rebuild(list));
 
 		if (inGameDirty)
 		{
-			refreshInGame();
+			refreshInGame(list);
 		}
 	}
 
-	private void refreshInGame()
+	private void refreshInGame(GroupList list)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
@@ -707,62 +912,66 @@ public class FriendGroupsPlugin extends Plugin
 		clientThread.invokeLater(() ->
 		{
 			final boolean registered = registerDotIcons();
-			rebuildFriendsList();
+			rebuildList(list);
 
 			// A freshly registered icon has no sprite index until ChatIconManager's own
 			// queued refresh runs, so redraw the list once more behind that refresh.
 			if (registered)
 			{
-				clientThread.invokeLater(this::rebuildFriendsList);
+				clientThread.invokeLater(() -> rebuildList(list));
 			}
 		});
 	}
 
-	private void promptNewGroup(String friend)
+	private void promptNewGroup(GroupStore store, String friend)
 	{
 		chatboxPanelManager.openTextInput(NEW_GROUP_PROMPT)
 			.onDone((String value) ->
 			{
-				final String name = FriendGroupManager.sanitizeName(value);
+				final String name = GroupStore.sanitizeName(value);
 				if (name == null)
 				{
 					return;
 				}
 
-				manager.addGroup(name);
-				manager.addMember(name, friend);
+				store.addGroup(name);
+				store.addMember(name, friend);
 			})
 			.build();
 	}
 
 	/**
-	 * Ensures a grid sprite exists for every 2x2 color batch a grouped friend needs. Batches are
-	 * registered lazily (only what a friend's group membership actually uses), since the theoretical
-	 * set across all groups is combinatorial. Driven off the manager's stored memberships rather than
-	 * the live friend container, so the sprites exist as soon as the config loads - the container is
-	 * still empty for a tick or two after login.
+	 * Ensures a grid sprite exists for every 2x2 color batch a grouped member (in either list) needs.
+	 * Batches are registered lazily (only what actual memberships use), since the theoretical set
+	 * across all groups is combinatorial. Driven off the stored memberships rather than the live
+	 * containers, so the sprites exist as soon as the config loads - the containers are still empty
+	 * for a tick or two after login.
 	 *
 	 * @return true if at least one new icon was registered
 	 */
 	private boolean registerDotIcons()
 	{
 		boolean registered = false;
-		final Set<String> seen = new HashSet<>();
-		for (FriendGroup group : manager.getGroups())
+		for (GroupList list : GroupList.values())
 		{
-			for (String member : group.getMembers())
+			final GroupStore store = storeFor(list);
+			final Set<String> seen = new HashSet<>();
+			for (FriendGroup group : store.getGroups())
 			{
-				if (!seen.add(FriendGroupManager.key(member)))
+				for (String member : group.getMembers())
 				{
-					continue;
-				}
-
-				for (List<Integer> grid : dotGrids(dotColors(member)))
-				{
-					if (!dotIcons.containsKey(grid))
+					if (!seen.add(GroupStore.key(member)))
 					{
-						dotIcons.put(grid, chatIconManager.registerChatIcon(createDotGrid(grid)));
-						registered = true;
+						continue;
+					}
+
+					for (List<Integer> grid : dotGrids(dotColors(store, member)))
+					{
+						if (!dotIcons.containsKey(grid))
+						{
+							dotIcons.put(grid, chatIconManager.registerChatIcon(createDotGrid(grid)));
+							registered = true;
+						}
 					}
 				}
 			}
@@ -787,7 +996,7 @@ public class FriendGroupsPlugin extends Plugin
 	 * Builds a single sprite packing up to four group colors into a 2x2 grid, filled left-to-right
 	 * then top-to-bottom. The full two-row grid is centred vertically in the row's line box, so a
 	 * partial batch (one or two dots) sits on the top row rather than floating in the middle.
-	 * Colors are the friend's live group colors, so custom-picked colors render as-is.
+	 * Colors are the member's live group colors, so custom-picked colors render as-is.
 	 */
 	private static BufferedImage createDotGrid(List<Integer> colors)
 	{
@@ -813,7 +1022,8 @@ public class FriendGroupsPlugin extends Plugin
 	 * Drops the "World " prefix the game writes before each online friend's world number,
 	 * leaving just the number. The world sits in its own row widget, separate from the name,
 	 * so it is rewritten here after the list is built rather than through the name callback.
-	 * Runs on the client thread from {@code ScriptPostFired(FRIENDS_UPDATE)}.
+	 * Runs on the client thread from {@code ScriptPostFired(FRIENDS_UPDATE)}. Friends list only -
+	 * the ignore list carries no world.
 	 */
 	private void stripWorldPrefixes()
 	{
@@ -855,20 +1065,19 @@ public class FriendGroupsPlugin extends Plugin
 		}
 	}
 
-	private void rebuildFriendsList()
+	private void rebuildList(GroupList list)
 	{
-		log.debug("Rebuilding friends list");
-		client.runScript(
-			ScriptID.FRIENDS_UPDATE,
-			InterfaceID.Friends.LIST_CONTAINER,
-			InterfaceID.Friends.SORT_NAME,
-			InterfaceID.Friends.SORT_RECENT,
-			InterfaceID.Friends.SORT_WORLD,
-			InterfaceID.Friends.SORT_LEGACY,
-			InterfaceID.Friends.LIST,
-			InterfaceID.Friends.SCROLLBAR,
-			InterfaceID.Friends.LOADING,
-			InterfaceID.Friends.TOOLTIP
-		);
+		log.debug("Rebuilding {} list", list.label);
+		client.runScript(list.rebuildScript());
+	}
+
+	/** The groups of the currently hovered in-game row, resolved from the right list. Read by the overlay. */
+	List<FriendGroup> hoveredGroups()
+	{
+		if (hoveredName == null || hoveredList == null)
+		{
+			return Collections.emptyList();
+		}
+		return storeFor(hoveredList).groupsFor(hoveredName);
 	}
 }

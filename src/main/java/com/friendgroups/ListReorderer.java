@@ -35,16 +35,14 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
-import javax.inject.Inject;
-import javax.inject.Singleton;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Friend;
-import net.runelite.api.FriendContainer;
 import net.runelite.api.FontID;
+import net.runelite.api.Nameable;
+import net.runelite.api.NameableContainer;
 import net.runelite.api.ScriptID;
-import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetTextAlignment;
@@ -74,21 +72,23 @@ import net.runelite.client.util.Text;
  * right-click actions work from any group.
  */
 @Slf4j
-@Singleton
-class FriendListReorderer
+class ListReorderer
 {
 	/** Fallback row height if it cannot be measured (only one friend online). */
 	private static final int FALLBACK_ROW_HEIGHT = 14;
 
 	private static final String RENAME_PROMPT = "Rename group<br>"
-		+ ColorUtil.prependColorTag("(limit " + FriendGroupManager.MAX_NAME_LENGTH + " characters)", new Color(0, 0, 170));
+		+ ColorUtil.prependColorTag("(limit " + GroupStore.MAX_NAME_LENGTH + " characters)", new Color(0, 0, 170));
 
 	private final Client client;
 	private final ClientThread clientThread;
-	private final FriendGroupManager manager;
+	private final GroupStore manager;
 	private final FriendGroupsConfig config;
 	private final ChatboxPanelManager chatboxPanelManager;
 	private final ColorPickerManager colorPickerManager;
+
+	/** Which list this reorderer clusters, supplying its widgets, container and marker setting. */
+	private final GroupList groupList;
 
 	/**
 	 * The header widgets this plugin has injected into the friends list. Tracked by
@@ -113,9 +113,8 @@ class FriendListReorderer
 	 */
 	private final Set<Widget> hiddenByMe = Collections.newSetFromMap(new IdentityHashMap<>());
 
-	@Inject
-	private FriendListReorderer(Client client, ClientThread clientThread, FriendGroupManager manager,
-		FriendGroupsConfig config, ChatboxPanelManager chatboxPanelManager, ColorPickerManager colorPickerManager)
+	ListReorderer(Client client, ClientThread clientThread, GroupStore manager, FriendGroupsConfig config,
+		ChatboxPanelManager chatboxPanelManager, ColorPickerManager colorPickerManager, GroupList groupList)
 	{
 		this.client = client;
 		this.clientThread = clientThread;
@@ -123,6 +122,7 @@ class FriendListReorderer
 		this.config = config;
 		this.chatboxPanelManager = chatboxPanelManager;
 		this.colorPickerManager = colorPickerManager;
+		this.groupList = groupList;
 	}
 
 	/** One row of the friends list: the widgets sharing an original Y, and the friend it renders. */
@@ -220,7 +220,7 @@ class FriendListReorderer
 			.value(currentName)
 			.onDone((String value) ->
 			{
-				final String newName = FriendGroupManager.sanitizeName(value);
+				final String newName = GroupStore.sanitizeName(value);
 				if (newName != null && !newName.equalsIgnoreCase(currentName))
 				{
 					manager.renameGroup(currentName, newName);
@@ -247,8 +247,8 @@ class FriendListReorderer
 	 */
 	void reorder()
 	{
-		final boolean grouped = config.inGameMarker() == InGameMarker.GROUPED;
-		final boolean hideOffline = config.hideOffline();
+		final boolean grouped = groupList.marker(config) == InGameMarker.GROUPED;
+		final boolean hideOffline = groupList.hideOffline(config);
 		if (!grouped && !hideOffline)
 		{
 			return;
@@ -256,7 +256,7 @@ class FriendListReorderer
 
 		assert client.isClientThread();
 
-		final Widget list = client.getWidget(InterfaceID.Friends.LIST);
+		final Widget list = client.getWidget(groupList.listWidget);
 		if (list == null)
 		{
 			return;
@@ -297,7 +297,7 @@ class FriendListReorderer
 			final String text = w.getText();
 			if (row.friendKey == null && text != null && !text.isEmpty())
 			{
-				final String key = FriendGroupManager.key(text);
+				final String key = GroupStore.key(text);
 				if (friendKeys.contains(key))
 				{
 					row.friendKey = key;
@@ -621,7 +621,7 @@ class FriendListReorderer
 	/** Called when the grouped layout is torn down, to restore the list before a normal redraw. */
 	void removeHeaders()
 	{
-		final Widget list = client.getWidget(InterfaceID.Friends.LIST);
+		final Widget list = client.getWidget(groupList.listWidget);
 		if (list == null)
 		{
 			return;
@@ -751,7 +751,7 @@ class FriendListReorderer
 	{
 		list.setScrollHeight(contentHeight);
 
-		final int scrollbar = InterfaceID.Friends.SCROLLBAR;
+		final int scrollbar = groupList.scrollbar;
 		final int y = Math.max(0, Math.min(list.getScrollY(), Math.max(0, contentHeight - list.getHeight())));
 		clientThread.invokeLater(() -> client.runScript(ScriptID.UPDATE_SCROLLBAR, scrollbar, list.getId(), y));
 	}
@@ -770,73 +770,78 @@ class FriendListReorderer
 		return min == Integer.MAX_VALUE ? FALLBACK_ROW_HEIGHT : min;
 	}
 
+	/** Keys of every member of this list, used to recognise which rows are real. */
 	private Set<String> friendKeys()
 	{
-		final FriendContainer container = client.getFriendContainer();
+		final NameableContainer<? extends Nameable> container = groupList.container(client);
 		if (container == null)
 		{
 			return new HashSet<>();
 		}
 
-		final Friend[] members = container.getMembers();
+		final Nameable[] members = container.getMembers();
 		if (members == null)
 		{
 			return new HashSet<>();
 		}
 
 		final Set<String> keys = new HashSet<>();
-		for (Friend friend : members)
+		for (Nameable member : members)
 		{
-			if (friend != null && friend.getName() != null)
+			if (member != null && member.getName() != null)
 			{
-				keys.add(FriendGroupManager.key(friend.getName()));
-			}
-		}
-		return keys;
-	}
-
-	/** Keys of friends the game reports as offline (no world), whose rows are hidden. */
-	private Set<String> offlineKeys()
-	{
-		final FriendContainer container = client.getFriendContainer();
-		if (container == null)
-		{
-			return new HashSet<>();
-		}
-
-		final Friend[] members = container.getMembers();
-		if (members == null)
-		{
-			return new HashSet<>();
-		}
-
-		final Set<String> keys = new HashSet<>();
-		for (Friend friend : members)
-		{
-			if (friend != null && friend.getName() != null && friend.getWorld() <= 0)
-			{
-				keys.add(FriendGroupManager.key(friend.getName()));
+				keys.add(GroupStore.key(member.getName()));
 			}
 		}
 		return keys;
 	}
 
 	/**
-	 * Logs the live structure of the friends list widget, for verifying the row
+	 * Keys of members the game reports as offline (no world), whose rows are hidden. Only friends
+	 * carry a world; the ignore list has none, so this is only reached when {@code hideOffline} is
+	 * on (never for the ignore list) and any non-{@link Friend} member is treated as present.
+	 */
+	private Set<String> offlineKeys()
+	{
+		final NameableContainer<? extends Nameable> container = groupList.container(client);
+		if (container == null)
+		{
+			return new HashSet<>();
+		}
+
+		final Nameable[] members = container.getMembers();
+		if (members == null)
+		{
+			return new HashSet<>();
+		}
+
+		final Set<String> keys = new HashSet<>();
+		for (Nameable member : members)
+		{
+			if (member instanceof Friend && member.getName() != null && ((Friend) member).getWorld() <= 0)
+			{
+				keys.add(GroupStore.key(member.getName()));
+			}
+		}
+		return keys;
+	}
+
+	/**
+	 * Logs the live structure of this list's widget, for verifying the row
 	 * layout this class assumes. Wired to the {@code ::fgdump} developer command.
 	 */
 	void dumpLayout()
 	{
-		final Widget list = client.getWidget(InterfaceID.Friends.LIST);
+		final Widget list = client.getWidget(groupList.listWidget);
 		if (list == null)
 		{
-			log.info("Friend Groups dump: Friends.LIST widget is null (open the friends tab first)");
+			log.info("Friend Groups dump [{}]: LIST widget is null (open the tab first)", groupList.label);
 			return;
 		}
 
 		final Widget[] children = list.getDynamicChildren();
-		log.info("Friend Groups dump: LIST id={} width={} height={} scrollHeight={} children={}",
-			list.getId(), list.getWidth(), list.getHeight(), list.getScrollHeight(),
+		log.info("Friend Groups dump [{}]: LIST id={} width={} height={} scrollHeight={} children={}",
+			groupList.label, list.getId(), list.getWidth(), list.getHeight(), list.getScrollHeight(),
 			children == null ? 0 : children.length);
 
 		if (children == null)

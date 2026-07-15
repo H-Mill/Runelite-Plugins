@@ -25,39 +25,37 @@
  */
 package com.friendgroups;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import net.runelite.api.gameval.InterfaceID;
 import org.junit.Test;
 
 /**
- * Some content rebuilds the whole friends interface rather than redrawing its rows - drinking from
- * a Pool of Refreshment tears the interface down and reloads it, and that reload repaints the list
- * ungrouped without firing {@code FRIENDS_UPDATE}, so our reapply path must run off the interface
+ * Some content rebuilds a whole social interface rather than redrawing its rows - drinking from a
+ * Pool of Refreshment tears the interface down and reloads it, and that reload repaints the list
+ * ungrouped without firing the list's update script, so our reapply path must run off the interface
  * load instead. This is the same family of bug as {@link SortRebuildTest}: a redraw that bypasses
- * our {@code ScriptPostFired} hook. The reapply must fire only for the friends interface and not
- * for the ignore list or anything else that shares the load event.
+ * our {@code ScriptPostFired} hook. The reapply must fire for the friends and ignore interfaces -
+ * each mapped to its own list - and not for anything else that shares the load event.
  */
 public class WidgetReloadTest
 {
 	@Test
-	public void reappliesWhenFriendsInterfaceReloads()
+	public void mapsFriendsInterfaceToTheFriendsList()
 	{
-		assertTrue(FriendGroupsPlugin.isFriendsInterfaceReload(InterfaceID.FRIENDS));
+		assertEquals(GroupList.FRIENDS, FriendGroupsPlugin.reloadedList(InterfaceID.FRIENDS));
 	}
 
 	@Test
-	public void leavesTheIgnoreListAlone()
+	public void mapsIgnoreInterfaceToTheIgnoreList()
 	{
-		// The friends and ignore lists share plumbing; broadening the guard to catch the ignore
-		// list would pointlessly rebuild the friends list on an unrelated interface load.
-		assertFalse(FriendGroupsPlugin.isFriendsInterfaceReload(InterfaceID.IGNORE));
+		assertEquals(GroupList.IGNORE, FriendGroupsPlugin.reloadedList(InterfaceID.IGNORE));
 	}
 
 	@Test
 	public void leavesOtherInterfacesAlone()
 	{
-		assertFalse(FriendGroupsPlugin.isFriendsInterfaceReload(InterfaceID.INVENTORY));
-		assertFalse(FriendGroupsPlugin.isFriendsInterfaceReload(InterfaceID.CHATBOX));
+		assertNull(FriendGroupsPlugin.reloadedList(InterfaceID.INVENTORY));
+		assertNull(FriendGroupsPlugin.reloadedList(InterfaceID.CHATBOX));
 	}
 }

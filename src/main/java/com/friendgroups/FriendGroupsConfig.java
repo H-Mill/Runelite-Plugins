@@ -28,6 +28,7 @@ package com.friendgroups;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(FriendGroupsConfig.GROUP)
@@ -39,12 +40,26 @@ public interface FriendGroupsConfig extends Config
 
 	String HIDE_SIDE_PANEL = "hideSidePanel";
 
+	@ConfigSection(
+			name = "Friends list",
+			description = "How your friend groups are shown in the in-game friends list.",
+			position = 10
+	)
+	String FRIENDS_SECTION = "friendsList";
+
+	@ConfigSection(
+			name = "Ignore list",
+			description = "How your ignore groups are shown in the in-game ignore list.",
+			position = 20
+	)
+	String IGNORE_SECTION = "ignoreList";
+
 	@ConfigItem(
 			position = 1,
 			keyName = HIDE_SIDE_PANEL,
 			name = "Hide side panel icon",
 			description = "Remove the Friend Groups icon from the side panel. Groups can still be managed "
-			+ "from the in-game friends list right-click menu."
+			+ "from the in-game friends and ignore list right-click menus."
 	)
 	default boolean hideSidePanel()
 	{
@@ -65,24 +80,9 @@ public interface FriendGroupsConfig extends Config
 
 	@ConfigItem(
 			position = 3,
-			keyName = "inGameMarker",
-			name = "In-game marker",
-			description = "How your friend groups are shown in the in-game friends list.<br>"
-			+ "'Colored dots' adds a small color swatch per group next to the name.<br>"
-			+ "'Grouped list' clusters the list under a colored header per group, in your group order "
-			+ "(experimental: it overrides the game's Name / Recent / World sorting, and a friend in "
-			+ "several groups appears under each of their groups)."
-	)
-	default InGameMarker inGameMarker()
-	{
-		return InGameMarker.GROUPED;
-	}
-
-	@ConfigItem(
-			position = 4,
 			keyName = "showTooltip",
 			name = "Hover tooltip",
-			description = "Show a friend's group names when hovering them in the in-game friends list"
+			description = "Show a friend's or ignored player's group names when hovering them in-game"
 	)
 	default boolean showTooltip()
 	{
@@ -90,11 +90,28 @@ public interface FriendGroupsConfig extends Config
 	}
 
 	@ConfigItem(
-			position = 5,
+			position = 1,
+			keyName = "inGameMarker",
+			name = "In-game marker",
+			description = "How your friend groups are shown in the in-game friends list.<br>"
+			+ "'Colored dots' adds a small color swatch per group next to the name.<br>"
+			+ "'Grouped list' clusters the list under a colored header per group, in your group order "
+			+ "(experimental: it overrides the game's Name / Recent / World sorting, and a friend in "
+			+ "several groups appears under each of their groups).",
+			section = FRIENDS_SECTION
+	)
+	default InGameMarker inGameMarker()
+	{
+		return InGameMarker.GROUPED;
+	}
+
+	@ConfigItem(
+			position = 2,
 			keyName = "hideOffline",
 			name = "Hide offline friends",
 			description = "Hide offline friends from the in-game friends list. A group whose members are "
-			+ "all offline is hidden as a result."
+			+ "all offline is hidden as a result.",
+			section = FRIENDS_SECTION
 	)
 	default boolean hideOffline()
 	{
@@ -102,13 +119,30 @@ public interface FriendGroupsConfig extends Config
 	}
 
 	@ConfigItem(
-			position = 6,
+			position = 3,
 			keyName = "hideWorldPrefix",
 			name = "Hide \"World\" prefix",
-			description = "In the in-game friends list, show just the world number (e.g. 369) instead of \"World 369\"."
+			description = "In the in-game friends list, show just the world number (e.g. 369) instead of \"World 369\".",
+			section = FRIENDS_SECTION
 	)
 	default boolean hideWorldPrefix()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+			position = 1,
+			keyName = "ignoreInGameMarker",
+			name = "In-game marker",
+			description = "How your ignore groups are shown in the in-game ignore list.<br>"
+			+ "'Colored dots' adds a small color swatch per group next to the name.<br>"
+			+ "'Grouped list' clusters the list under a colored header per group, in your group order "
+			+ "(experimental: it overrides the game's Name sorting, and an ignored player in several "
+			+ "groups appears under each of their groups).",
+			section = IGNORE_SECTION
+	)
+	default InGameMarker ignoreInGameMarker()
+	{
+		return InGameMarker.GROUPED;
 	}
 }

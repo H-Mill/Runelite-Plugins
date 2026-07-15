@@ -25,9 +25,11 @@
  */
 package com.friendgroups;
 
+import java.util.Collections;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import net.runelite.api.Client;
@@ -59,8 +61,11 @@ abstract class PluginEndToEndHarness
 	protected FriendGroupsConfig config;
 	@Mock
 	protected ConfigManager configManager;
+	// Named to match the plugin's fields: @InjectMocks disambiguates two same-type mocks by field name.
 	@Mock
-	protected FriendGroupManager manager;
+	protected GroupStore friendStore;
+	@Mock
+	protected GroupStore ignoreStore;
 	@Mock
 	protected FriendGroupsPanel panel;
 	@Mock
@@ -76,7 +81,9 @@ abstract class PluginEndToEndHarness
 	@Mock
 	protected EventBus eventBus;
 	@Mock
-	protected FriendListReorderer reorderer;
+	protected ListReorderer friendReorderer;
+	@Mock
+	protected ListReorderer ignoreReorderer;
 
 	@InjectMocks
 	protected FriendGroupsPlugin plugin;
@@ -107,8 +114,18 @@ abstract class PluginEndToEndHarness
 	}
 
 	/**
+	 * Stubs both stores as having no groups, so the plugin's icon registration is a no-op and the
+	 * list is rebuilt exactly once per refresh (registration is driven off both stores' groups).
+	 */
+	protected void stubStoresEmpty()
+	{
+		when(friendStore.getGroups()).thenReturn(Collections.emptyList());
+		when(ignoreStore.getGroups()).thenReturn(Collections.emptyList());
+	}
+
+	/**
 	 * Asserts the friends-list build script was run exactly once, with the widget ids the plugin's
-	 * {@code rebuildFriendsList()} passes - i.e. the list was redrawn so our layout is reapplied.
+	 * rebuild passes - i.e. the list was redrawn so our layout is reapplied.
 	 */
 	protected void verifyFriendsListRebuilt()
 	{
@@ -123,5 +140,19 @@ abstract class PluginEndToEndHarness
 			InterfaceID.Friends.SCROLLBAR,
 			InterfaceID.Friends.LOADING,
 			InterfaceID.Friends.TOOLTIP);
+	}
+
+	/** Asserts the ignore-list build script was run exactly once (no world/recent sort widgets). */
+	protected void verifyIgnoreListRebuilt()
+	{
+		verify(client).runScript(
+			ScriptID.IGNORE_UPDATE,
+			InterfaceID.Ignore.LIST_CONTAINER,
+			InterfaceID.Ignore.SORT_NAME,
+			InterfaceID.Ignore.SORT_LEGACY,
+			InterfaceID.Ignore.LIST,
+			InterfaceID.Ignore.SCROLLBAR,
+			InterfaceID.Ignore.LOADING,
+			InterfaceID.Ignore.TOOLTIP);
 	}
 }
