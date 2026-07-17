@@ -55,11 +55,17 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import net.runelite.client.ui.ColorScheme;
+import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.components.DragAndDropReorderPane;
+import net.runelite.client.ui.components.FlatTextField;
+import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
 import net.runelite.client.util.ImageUtil;
@@ -88,6 +94,11 @@ class GroupListView extends JPanel
 	/** Width of the world-number column, wide enough for a 3-digit world. */
 	private static final int WORLD_COLUMN_WIDTH = 26;
 
+	private static final int SEARCH_HEIGHT = 24;
+
+	/** Width of the search box's icon and clear-button gutters. */
+	private static final int SEARCH_GUTTER_WIDTH = 24;
+
 	/** Client property on each group section holding its group name, so a drop resolves which moved. */
 	private static final String GROUP_NAME_KEY = "friendGroupName";
 
@@ -103,6 +114,7 @@ class GroupListView extends JPanel
 	private static final ImageIcon EXPAND_ICON;
 	/** Shown on a group heading when the group is expanded (points down, "collapse"). */
 	private static final ImageIcon COLLAPSE_ICON;
+	private static final ImageIcon SEARCH_ICON;
 
 	static
 	{
@@ -124,6 +136,9 @@ class GroupListView extends JPanel
 
 		EXPAND_ICON = new ImageIcon(ImageUtil.loadImageResource(GroupListView.class, "/com/friendgroups/icon_right_arrow.png"));
 		COLLAPSE_ICON = new ImageIcon(ImageUtil.loadImageResource(GroupListView.class, "/com/friendgroups/icon_down_arrow.png"));
+
+		// The client's own search glyph, so the box matches the search fields in the rest of RuneLite.
+		SEARCH_ICON = new ImageIcon(ImageUtil.loadImageResource(IconTextField.class, "search.png"));
 	}
 
 	private final GroupStore manager;
@@ -133,6 +148,11 @@ class GroupListView extends JPanel
 
 	private final JPanel content = new JPanel();
 	private final JButton newGroup = smallButton(ADD + " New Group", "Create a new group", this::createGroup);
+	private final FlatTextField search = new FlatTextField();
+	private final JButton clearSearch = makeClearButton();
+
+	/** Normalized search text ({@link GroupStore#key}); empty when not filtering. */
+	private String filter = "";
 
 	/** Member display names in list order. */
 	private List<String> memberNames = Collections.emptyList();
@@ -159,13 +179,21 @@ class GroupListView extends JPanel
 		final JPanel actions = new JPanel();
 		actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
 		actions.setOpaque(false);
+		actions.setAlignmentX(LEFT_ALIGNMENT);
 		actions.add(newGroup);
 		actions.add(Box.createHorizontalGlue());
+
+		final JPanel header = new JPanel();
+		header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+		header.setOpaque(false);
+		header.add(actions);
+		header.add(Box.createRigidArea(new Dimension(0, 4)));
+		header.add(searchField());
 
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setOpaque(false);
 
-		add(actions, BorderLayout.NORTH);
+		add(header, BorderLayout.NORTH);
 		add(content, BorderLayout.CENTER);
 	}
 
@@ -173,7 +201,107 @@ class GroupListView extends JPanel
 	{
 		this.loggedIn = loggedIn;
 		newGroup.setEnabled(loggedIn);
+		search.setEditable(loggedIn);
 		rebuild();
+	}
+
+	/**
+	 * The search box: RuneLite's flat field between a search glyph and a clear button. Assembled here
+	 * rather than using {@link IconTextField} because that hardcodes a red-on-pink clear button.
+	 */
+	private JPanel searchField()
+	{
+		// The icon gutter stands in for the field's own left padding.
+		search.setBorder(null);
+		search.setEditable(false);
+
+		// The look-and-feel's default input text is near-black against the dark field. The caret
+		// takes its color from the LAF separately, so it needs setting too.
+		final JTextField input = search.getTextField();
+		input.setForeground(Color.WHITE);
+		input.setCaretColor(Color.WHITE);
+		// A document listener also covers the clear button and pasted text, which key events miss.
+		search.getDocument().addDocumentListener(new DocumentListener()
+		{
+			@Override
+			public void insertUpdate(DocumentEvent e)
+			{
+				onSearchChanged();
+			}
+
+			@Override
+			public void removeUpdate(DocumentEvent e)
+			{
+				onSearchChanged();
+			}
+
+			@Override
+			public void changedUpdate(DocumentEvent e)
+			{
+				onSearchChanged();
+			}
+		});
+
+		final JLabel icon = new JLabel(SEARCH_ICON, SwingConstants.CENTER);
+		icon.setPreferredSize(new Dimension(SEARCH_GUTTER_WIDTH, 0));
+
+		final JPanel field = new JPanel(new BorderLayout());
+		field.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		field.setToolTipText("Filter " + memberNoun() + "s by name");
+		field.setAlignmentX(LEFT_ALIGNMENT);
+		field.setPreferredSize(new Dimension(0, SEARCH_HEIGHT));
+		field.setMaximumSize(new Dimension(Integer.MAX_VALUE, SEARCH_HEIGHT));
+		field.add(icon, BorderLayout.WEST);
+		field.add(search, BorderLayout.CENTER);
+		field.add(clearSearch, BorderLayout.EAST);
+		return field;
+	}
+
+	private void onSearchChanged()
+	{
+		// The raw text drives the button, so a whitespace-only search still offers a way out of it.
+		clearSearch.setVisible(!search.getText().isEmpty());
+
+		final String text = GroupStore.key(search.getText());
+		if (text.equals(filter))
+		{
+			return;
+		}
+
+		filter = text;
+		rebuild();
+	}
+
+	/** The × that empties the search box, shown only while there is something to clear. */
+	private JButton makeClearButton()
+	{
+		final JButton button = new JButton("×");
+		button.setFont(FontManager.getRunescapeBoldFont());
+		button.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		button.setToolTipText("Clear search");
+		button.setPreferredSize(new Dimension(SEARCH_GUTTER_WIDTH, 0));
+		button.setVisible(false);
+		button.setMargin(new Insets(0, 0, 0, 0));
+		button.setBorderPainted(false);
+		button.setContentAreaFilled(false);
+		button.setFocusPainted(false);
+		button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		button.addActionListener(e -> search.setText(""));
+		button.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				button.setForeground(Color.WHITE);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				button.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			}
+		});
+		return button;
 	}
 
 	/**
@@ -226,28 +354,52 @@ class GroupListView extends JPanel
 		final List<String> ungrouped = new ArrayList<>();
 		for (String name : memberNames)
 		{
-			if (!grouped.contains(GroupStore.key(name)))
+			if (!grouped.contains(GroupStore.key(name)) && matches(name))
 			{
 				ungrouped.add(name);
 			}
 		}
 
+		final boolean filtering = !filter.isEmpty();
+
 		if (groups.isEmpty())
 		{
-			content.add(hint("No groups yet. Press + above, or right-click a name in the in-game "
-				+ list.label.toLowerCase() + " list and choose \"Assign group\"."));
+			if (!filtering)
+			{
+				content.add(hint("No groups yet. Press + above, or right-click a name in the in-game "
+					+ list.label.toLowerCase() + " list and choose \"Assign group\"."));
+			}
 
 			if (!ungrouped.isEmpty())
 			{
 				content.add(ungroupedSection(ungrouped, null));
 			}
+			else if (filtering)
+			{
+				content.add(hint(noMatchesText()));
+			}
 		}
 		else
 		{
-			final DragAndDropReorderPane reorderPane = new DragAndDropReorderPane();
-			reorderPane.setAlignmentX(LEFT_ALIGNMENT);
-			reorderPane.addDragListener(comp -> persistOrder(reorderPane));
+			// Reordering is disabled while filtering: the hidden sections are absent from the pane,
+			// so persisting a drag would push every one of them to the end of the saved order.
+			final DragAndDropReorderPane reorderPane = filtering ? null : new DragAndDropReorderPane();
+			final JComponent host;
+			if (reorderPane != null)
+			{
+				reorderPane.addDragListener(comp -> persistOrder(reorderPane));
+				host = reorderPane;
+			}
+			else
+			{
+				final JPanel column = new JPanel();
+				column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
+				column.setOpaque(false);
+				host = column;
+			}
+			host.setAlignmentX(LEFT_ALIGNMENT);
 
+			int shown = 0;
 			final int ungroupedPos = manager.ungroupedPosition();
 			for (int i = 0; i <= groups.size(); i++)
 			{
@@ -255,23 +407,44 @@ class GroupListView extends JPanel
 				{
 					final JPanel section = ungroupedSection(ungrouped, reorderPane);
 					section.putClientProperty(GROUP_NAME_KEY, GroupStore.UNGROUPED);
-					reorderPane.add(section);
+					host.add(section);
+					shown++;
 				}
 				if (i < groups.size())
 				{
 					final FriendGroup group = groups.get(i);
-					final JPanel section = groupSection(group, reorderPane);
+					final List<String> members = visibleMembers(group.getMembers());
+					// A group with nothing matching is dropped, rather than left as an empty heading.
+					if (filtering && members.isEmpty())
+					{
+						continue;
+					}
+
+					final JPanel section = groupSection(group, members, reorderPane);
 					section.putClientProperty(GROUP_NAME_KEY, group.getName());
-					reorderPane.add(section);
+					host.add(section);
+					shown++;
 				}
 			}
 
-			content.add(reorderPane);
-			content.add(Box.createRigidArea(new Dimension(0, 4)));
+			if (shown == 0)
+			{
+				content.add(hint(noMatchesText()));
+			}
+			else
+			{
+				content.add(host);
+				content.add(Box.createRigidArea(new Dimension(0, 4)));
+			}
 		}
 
 		content.revalidate();
 		content.repaint();
+	}
+
+	private String noMatchesText()
+	{
+		return "No " + memberNoun() + "s match your search.";
 	}
 
 	/** Reads the pane's current section order and saves it (group names plus the Ungrouped marker). */
@@ -306,10 +479,13 @@ class GroupListView extends JPanel
 		manager.applyOrder(order);
 	}
 
-	private JPanel groupSection(FriendGroup group, DragAndDropReorderPane reorderPane)
+	/**
+	 * @param members     the group's members to show, already sorted and filtered
+	 * @param reorderPane the pane to drag within, or null when reordering is off (a filter is active)
+	 */
+	private JPanel groupSection(FriendGroup group, List<String> members, DragAndDropReorderPane reorderPane)
 	{
 		final String name = group.getName();
-		final List<String> members = sortedMembers(group.getMembers());
 
 		final String count;
 		if (showWorlds)
@@ -358,12 +534,14 @@ class GroupListView extends JPanel
 			}
 		});
 
-		final JLabel dragHandle = makeDragHandle(reorderPane);
-		dragHandle.setBorder(new EmptyBorder(0, 0, 0, 6));
-
 		final JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
 		actions.setOpaque(false);
-		actions.add(dragHandle);
+		if (reorderPane != null)
+		{
+			final JLabel dragHandle = makeDragHandle(reorderPane);
+			dragHandle.setBorder(new EmptyBorder(0, 0, 0, 6));
+			actions.add(dragHandle);
+		}
 		actions.add(swatch);
 		actions.add(iconButton(EDIT_ICON, EDIT_HOVER_ICON, "Rename", () -> renameGroup(group)));
 		actions.add(iconButton(DELETE_ICON, DELETE_HOVER_ICON, "Delete", () -> deleteGroup(group)));
@@ -427,16 +605,15 @@ class GroupListView extends JPanel
 		final JPanel section = boundedPanel();
 		section.setOpaque(true);
 		section.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		// A press on the section's dead areas is absorbed so only the grip handle can start a
+		// drag; the matte paints the inter-row gap, matching the group sections.
+		section.addMouseListener(new MouseAdapter()
+		{
+		});
+		section.setBorder(BorderFactory.createMatteBorder(0, 0, 4, 0, ColorScheme.DARK_GRAY_COLOR));
 
 		if (reorderPane != null)
 		{
-			// A press on the section's dead areas is absorbed so only the grip handle can start a
-			// drag; the matte paints the inter-row gap, matching the group sections.
-			section.addMouseListener(new MouseAdapter()
-			{
-			});
-			section.setBorder(BorderFactory.createMatteBorder(0, 0, 4, 0, ColorScheme.DARK_GRAY_COLOR));
-
 			final JLabel dragHandle = makeDragHandle(reorderPane);
 			dragHandle.setBorder(new EmptyBorder(0, 0, 0, 6));
 
@@ -624,6 +801,31 @@ class GroupListView extends JPanel
 	private String memberNoun()
 	{
 		return showWorlds ? "friend" : "ignored player";
+	}
+
+	/** {@link #sortedMembers} with the search filter applied. */
+	private List<String> visibleMembers(List<String> members)
+	{
+		final List<String> sorted = sortedMembers(members);
+		sorted.removeIf(member -> !matchesSearch(member, filter));
+		return sorted;
+	}
+
+	private boolean matches(String name)
+	{
+		return matchesSearch(name, filter);
+	}
+
+	/**
+	 * Whether {@code name} contains the search text. Both sides go through {@link GroupStore#key},
+	 * so the match ignores case, the non-breaking spaces the game uses in display names, and the
+	 * underscores and hyphens players type in place of those spaces.
+	 *
+	 * @param filter search text already normalized by {@link GroupStore#key}; empty matches everything
+	 */
+	static boolean matchesSearch(String name, String filter)
+	{
+		return filter.isEmpty() || GroupStore.key(name).contains(filter);
 	}
 
 	private List<String> sortedMembers(List<String> members)
