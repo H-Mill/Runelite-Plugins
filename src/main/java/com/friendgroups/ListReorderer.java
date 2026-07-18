@@ -369,9 +369,12 @@ class ListReorderer
 		}
 
 		// Walk the sections top to bottom: a header takes a slot, then its members follow
-		// (unless the section is collapsed, in which case the members are hidden and take no
-		// slots so the following headers move up). A friend in several groups appears in each:
-		// their real row fills the first slot, and the rest are interactive clones of it.
+		// (unless the section is collapsed, in which case the members take no slots so the
+		// following headers move up). A friend in several groups appears under each expanded
+		// one: their real row fills the first, and the rest are interactive clones of it. A
+		// collapsed group shows nothing for its members, so it is skipped entirely here - the
+		// real row is placed by whichever expanded group also holds the friend, and a friend
+		// who appears only under collapsed groups is hidden after the walk.
 		clones.clear();
 		final Set<Row> materialized = Collections.newSetFromMap(new IdentityHashMap<>());
 		int slot = 0;
@@ -382,19 +385,13 @@ class ListReorderer
 			headerSlots.add(new int[]{slot, s});
 			slot++;
 
+			if (section.collapsed)
+			{
+				continue;
+			}
+
 			for (Row row : section.members)
 			{
-				if (section.collapsed)
-				{
-					// Hide the real row on its first appearance; a duplicate under a collapsed
-					// group simply shows nothing.
-					if (materialized.add(row))
-					{
-						hideRow(row);
-					}
-					continue;
-				}
-
 				final int rowY = baseY + slot * rowHeight;
 				if (materialized.add(row))
 				{
@@ -405,6 +402,18 @@ class ListReorderer
 					cloneRow(list, row, rowY, rowHeight, clonePool);
 				}
 				slot++;
+			}
+		}
+
+		// Every placed row is a real, visible row. Any visible friend not placed above appears
+		// only under collapsed group(s), so hide its real row. Doing this after the walk means a
+		// friend shared between a collapsed and an expanded group stays visible under the latter,
+		// regardless of which section comes first.
+		for (Row row : visible)
+		{
+			if (!materialized.contains(row))
+			{
+				hideRow(row);
 			}
 		}
 
