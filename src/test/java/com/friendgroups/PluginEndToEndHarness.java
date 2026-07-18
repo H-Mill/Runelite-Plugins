@@ -40,7 +40,9 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.game.ChatIconManager;
+import net.runelite.client.game.WorldService;
 import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -84,6 +86,10 @@ abstract class PluginEndToEndHarness
 	protected ListReorderer friendReorderer;
 	@Mock
 	protected ListReorderer ignoreReorderer;
+	@Mock
+	protected WorldService worldService;
+	@Mock
+	protected ChatMessageManager chatMessageManager;
 
 	@InjectMocks
 	protected FriendGroupsPlugin plugin;
@@ -96,6 +102,16 @@ abstract class PluginEndToEndHarness
 			((Runnable) inv.getArgument(0)).run();
 			return null;
 		}).when(clientThread).invokeLater(any(Runnable.class));
+	}
+
+	/** Makes {@link ClientThread#invoke(Runnable)} run its task inline, as a hop is bounced through it. */
+	protected void runClientThreadInvokeInline()
+	{
+		doAnswer(inv ->
+		{
+			((Runnable) inv.getArgument(0)).run();
+			return null;
+		}).when(clientThread).invoke(any(Runnable.class));
 	}
 
 	protected static WidgetLoaded widgetLoaded(int groupId)

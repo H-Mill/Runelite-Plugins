@@ -28,11 +28,13 @@ package com.friendgroups;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Insets;
+import java.awt.Point;
 import java.awt.Window;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -44,6 +46,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntConsumer;
 import javax.swing.Box;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -164,6 +167,9 @@ class GroupListView extends JPanel
 	/** Groups and members are only shown while logged in. */
 	private boolean loggedIn;
 
+	/** Hops to the given world when a friend row is double-clicked; null when hopping is unavailable. */
+	private IntConsumer onHop;
+
 	GroupListView(GroupStore manager, ColorPickerManager colorPickerManager, GroupList list)
 	{
 		this.manager = manager;
@@ -195,6 +201,12 @@ class GroupListView extends JPanel
 
 		add(header, BorderLayout.NORTH);
 		add(content, BorderLayout.CENTER);
+	}
+
+	/** Sets the action run with a friend's world number when their row is double-clicked. */
+	void setOnHop(IntConsumer onHop)
+	{
+		this.onHop = onHop;
 	}
 
 	void setLoggedIn(boolean loggedIn)
@@ -659,11 +671,12 @@ class GroupListView extends JPanel
 				() -> manager.removeMember(groupName, member)));
 		}
 
+		final Integer world = showWorlds ? worldByKey.get(GroupStore.key(member)) : null;
+
 		final JPanel right = new JPanel(new BorderLayout(4, 0));
 		right.setOpaque(false);
 		if (showWorlds)
 		{
-			final Integer world = worldByKey.get(GroupStore.key(member));
 			final JLabel worldLabel = new JLabel(world != null && world > 0 ? String.valueOf(world) : "",
 				SwingConstants.CENTER);
 			worldLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
@@ -678,7 +691,80 @@ class GroupListView extends JPanel
 		row.add(name, BorderLayout.WEST);
 		row.add(right, BorderLayout.EAST);
 
+		addRowHover(row);
+
+		// Double-click an online friend on another world to quick-hop to their world. Swing does not
+		// bubble mouse events to a parent, so the listener is added to both the name and the row so a
+		// click anywhere along the row (not just the dead space) is caught.
+		if (isHoppable(world, playerWorld))
+		{
+			final String tooltip = "Double-click to hop to World " + world;
+			name.setToolTipText(tooltip);
+			row.setToolTipText(tooltip);
+			name.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+			final MouseAdapter hop = new MouseAdapter()
+			{
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					if (e.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(e) && onHop != null)
+					{
+						onHop.accept(world);
+					}
+				}
+			};
+			name.addMouseListener(hop);
+			row.addMouseListener(hop);
+		}
+
 		return row;
+	}
+
+	/**
+	 * Paints the row's background while the pointer is anywhere over it. The row is transparent by
+	 * default (showing the section behind it) and only made opaque while hovered. The listener is
+	 * added to the row and all its children, since Swing routes a mouse event to the deepest component
+	 * and does not bubble it up; the exit is ignored unless the pointer has truly left the row, so
+	 * moving between a row's own children does not flicker the highlight.
+	 */
+	private static void addRowHover(JPanel row)
+	{
+		final MouseAdapter hover = new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				row.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR);
+				row.setOpaque(true);
+				row.repaint();
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				final Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(), row);
+				if (!row.contains(p))
+				{
+					row.setOpaque(false);
+					row.repaint();
+				}
+			}
+		};
+		addRecursiveMouseListener(row, hover);
+	}
+
+	/** Adds {@code listener} to {@code component} and every descendant, so hovering a child still fires it. */
+	private static void addRecursiveMouseListener(Component component, MouseAdapter listener)
+	{
+		component.addMouseListener(listener);
+		if (component instanceof Container)
+		{
+			for (Component child : ((Container) component).getComponents())
+			{
+				addRecursiveMouseListener(child, listener);
+			}
+		}
 	}
 
 	private void showAddPopup(Component invoker, String member)
@@ -826,6 +912,19 @@ class GroupListView extends JPanel
 	static boolean matchesSearch(String name, String filter)
 	{
 		return filter.isEmpty() || GroupStore.key(name).contains(filter);
+	}
+
+	/**
+	 * Whether double-clicking a friend's row should hop to their world: they must be online (a world
+	 * number greater than zero) and on a world other than the one we are on. Offline friends and
+	 * friends already on our world are not hoppable.
+	 *
+	 * @param world       the friend's world, 0 when offline, null on lists without online status
+	 * @param playerWorld our current world, 0 when unknown
+	 */
+	static boolean isHoppable(Integer world, int playerWorld)
+	{
+		return world != null && world > 0 && world != playerWorld;
 	}
 
 	private List<String> sortedMembers(List<String> members)
