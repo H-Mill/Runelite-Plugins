@@ -40,7 +40,8 @@ import net.runelite.api.gameval.VarClientID;
  * simply run one instance per value.
  *
  * <p>The ignore list is the friends list minus its online/world concept: it has no
- * Recent/World sort buttons, {@link #hideOffline} is always false, and its rows carry no world.
+ * Recent/World sort buttons, {@link #offlineDisplay} is always {@link OfflineDisplay#IN_GROUP}, and
+ * its rows carry no world.
  */
 enum GroupList
 {
@@ -66,6 +67,7 @@ enum GroupList
 		"groups",
 		"ungroupedOrder",
 		"ungroupedCollapsed",
+		"offlineCollapsed",
 		true)
 	{
 		@Override
@@ -75,9 +77,9 @@ enum GroupList
 		}
 
 		@Override
-		boolean hideOffline(FriendGroupsConfig config)
+		OfflineDisplay offlineDisplay(FriendGroupsConfig config)
 		{
-			return config.hideOffline();
+			return config.offlineDisplay();
 		}
 
 		@Override
@@ -107,6 +109,7 @@ enum GroupList
 		"ignoreGroups",
 		"ignoreUngroupedOrder",
 		"ignoreUngroupedCollapsed",
+		"ignoreOfflineCollapsed",
 		false)
 	{
 		@Override
@@ -116,9 +119,9 @@ enum GroupList
 		}
 
 		@Override
-		boolean hideOffline(FriendGroupsConfig config)
+		OfflineDisplay offlineDisplay(FriendGroupsConfig config)
 		{
-			return false;
+			return OfflineDisplay.IN_GROUP;
 		}
 
 		@Override
@@ -148,12 +151,14 @@ enum GroupList
 	final String groupsKey;
 	final String ungroupedOrderKey;
 	final String ungroupedCollapsedKey;
+	/** Collapse state of the "Offline" section; unused by the ignore list, which never shows one. */
+	final String offlineCollapsedKey;
 	/** Whether rows carry an online world; false for the ignore list, which has no online status. */
 	final boolean tracksOnline;
 
 	GroupList(String label, int interfaceGroup, int listWidget, int scrollbar, int updateScript,
 		int[] rebuildArgs, int sortVar, String anchorOption, String groupsKey, String ungroupedOrderKey,
-		String ungroupedCollapsedKey, boolean tracksOnline)
+		String ungroupedCollapsedKey, String offlineCollapsedKey, boolean tracksOnline)
 	{
 		this.label = label;
 		this.interfaceGroup = interfaceGroup;
@@ -166,14 +171,18 @@ enum GroupList
 		this.groupsKey = groupsKey;
 		this.ungroupedOrderKey = ungroupedOrderKey;
 		this.ungroupedCollapsedKey = ungroupedCollapsedKey;
+		this.offlineCollapsedKey = offlineCollapsedKey;
 		this.tracksOnline = tracksOnline;
 	}
 
 	/** The in-game marker mode configured for this list (friends and ignore have separate controls). */
 	abstract InGameMarker marker(FriendGroupsConfig config);
 
-	/** Whether offline members are hidden in-game; always false for the ignore list. */
-	abstract boolean hideOffline(FriendGroupsConfig config);
+	/**
+	 * Where offline members go in-game; always {@link OfflineDisplay#IN_GROUP} for the ignore list,
+	 * whose members have no online status.
+	 */
+	abstract OfflineDisplay offlineDisplay(FriendGroupsConfig config);
 
 	/** This list's name container. */
 	abstract NameableContainer<? extends Nameable> container(Client client);

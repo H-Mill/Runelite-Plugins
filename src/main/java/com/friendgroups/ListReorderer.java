@@ -139,24 +139,45 @@ class ListReorderer
 		}
 	}
 
-	/** A displayed group (or the Ungrouped bucket, when {@code group} is null) and its rows. */
+	/** What a displayed section stands for: one of the user's groups, or a built-in bucket. */
+	private enum Kind
+	{
+		GROUP,
+		UNGROUPED,
+		OFFLINE
+	}
+
+	/** A displayed section - a group, the Ungrouped bucket or the Offline bucket - and its rows. */
 	private static final class Section
 	{
+		private final Kind kind;
+		/** The group this section shows; null for the Ungrouped and Offline buckets. */
 		private final FriendGroup group;
 		private final boolean collapsed;
 		private final List<Row> members = new ArrayList<>();
 
-		private Section(FriendGroup group, boolean collapsed)
+		private Section(Kind kind, FriendGroup group, boolean collapsed)
 		{
+			this.kind = kind;
 			this.group = group;
 			this.collapsed = collapsed;
 		}
 	}
 
-	/** Handles a click on a header: op 1 toggles collapse, ops 2/3 move a real group. */
-	private void onHeaderOp(int op, FriendGroup group, boolean collapsed)
+	/** Handles a click on a header: op 1 toggles collapse, ops 2/3 move a movable section. */
+	private void onHeaderOp(int op, Kind kind, FriendGroup group, boolean collapsed)
 	{
-		if (group == null)
+		if (kind == Kind.OFFLINE)
+		{
+			// The Offline bucket is pinned to the bottom, so collapse is its only op.
+			if (op == 1)
+			{
+				manager.setOfflineCollapsed(!collapsed);
+			}
+			return;
+		}
+
+		if (kind == Kind.UNGROUPED)
 		{
 			switch (op)
 			{
@@ -240,16 +261,16 @@ class ListReorderer
 	}
 
 	/**
-	 * Reapplies our in-game layout after the friends list is built: hides offline friends when
-	 * that option is on, and in {@link InGameMarker#GROUPED} mode clusters the remaining rows
-	 * under a header per group. Runs on the client thread from
+	 * Reapplies our in-game layout after the friends list is built: hides or sinks offline friends
+	 * per {@link OfflineDisplay}, and in {@link InGameMarker#GROUPED} mode clusters the remaining
+	 * rows under a header per group. Runs on the client thread from
 	 * {@code ScriptPostFired(FRIENDS_UPDATE)}.
 	 */
 	void reorder()
 	{
 		final boolean grouped = groupList.marker(config) == InGameMarker.GROUPED;
-		final boolean hideOffline = groupList.hideOffline(config);
-		if (!grouped && !hideOffline)
+		final OfflineDisplay offlineDisplay = groupList.offlineDisplay(config);
+		if (!grouped && offlineDisplay == OfflineDisplay.IN_GROUP)
 		{
 			return;
 		}
@@ -325,34 +346,46 @@ class ListReorderer
 		final int baseY = friendRows.get(0).originalY;
 		final int rowHeight = measureRowHeight(friendRows);
 
-		// Hide offline friends first, so both the flat and grouped layouts lay out only the
-		// rows that remain visible.
-		final List<Row> visible = new ArrayList<>();
-		if (hideOffline)
+		// Deal with the offline friends first, so both the flat and grouped layouts lay out only
+		// the rows that remain visible.
+		final List<Row> online = new ArrayList<>();
+		final List<Row> offlineRows = new ArrayList<>();
+		if (offlineDisplay == OfflineDisplay.IN_GROUP)
+		{
+			online.addAll(friendRows);
+		}
+		else
 		{
 			final Set<String> offline = offlineKeys();
 			for (Row row : friendRows)
 			{
-				if (offline.contains(row.friendKey))
+				if (!offline.contains(row.friendKey))
 				{
-					hideRow(row);
+					online.add(row);
+				}
+				else if (offlineDisplay == OfflineDisplay.SEPARATE_GROUP)
+				{
+					offlineRows.add(row);
 				}
 				else
 				{
-					visible.add(row);
+					hideRow(row);
 				}
 			}
 		}
-		else
-		{
-			visible.addAll(friendRows);
-		}
 
-		final List<Section> sections = grouped ? buildSections(visible) : Collections.<Section>emptyList();
+		// Everything still on screen, online rows first: the flat layout's order, and what the
+		// grouped walk checks against to hide whatever it never placed.
+		final List<Row> visible = new ArrayList<>(online);
+		visible.addAll(offlineRows);
+
+		final List<Section> sections = grouped ? buildSections(online, offlineRows) : Collections.<Section>emptyList();
 		if (sections.isEmpty())
 		{
 			// Not grouped, or no group matches a visible friend: keep the natural order, just
-			// pulled together so any hidden offline rows leave no gaps. No headers or clones here.
+			// pulled together so any hidden offline rows leave no gaps. There are no headers here
+			// to divide off an Offline section, so those rows simply sink to the bottom in
+			// `visible`. No headers or clones here.
 			parkAll(pool);
 			parkClones(clonePool);
 
@@ -464,10 +497,11 @@ class ListReorderer
 	 * Groups the recognised rows into ordered display sections. Groups come first in the manager's
 	 * order, with the Ungrouped section interleaved at its own configurable position; a friend in
 	 * several groups appears under each of them (the walk that consumes these sections turns the
-	 * extra appearances into interactive clones). Returns empty when no group has a member, so the
-	 * natural list is left untouched.
+	 * extra appearances into interactive clones). Any {@code offlineRows} are already excluded from
+	 * the group clustering by the caller and get their own section, pinned last. Returns empty when
+	 * no group has a member, so the natural list is left untouched.
 	 */
-	private List<Section> buildSections(List<Row> friendRows)
+	private List<Section> buildSections(List<Row> friendRows, List<Row> offlineRows)
 	{
 		final List<FriendGroup> groups = manager.getGroups();
 		final Set<String> grouped = new HashSet<>();
@@ -477,7 +511,7 @@ class ListReorderer
 		boolean anyGroupMembers = false;
 		for (FriendGroup group : groups)
 		{
-			final Section section = new Section(group, group.isCollapsed());
+			final Section section = new Section(Kind.GROUP, group, group.isCollapsed());
 			for (Row row : friendRows)
 			{
 				if (group.contains(row.friendName))
@@ -497,7 +531,7 @@ class ListReorderer
 			return new ArrayList<>();
 		}
 
-		final Section ungrouped = new Section(null, manager.isUngroupedCollapsed());
+		final Section ungrouped = new Section(Kind.UNGROUPED, null, manager.isUngroupedCollapsed());
 		for (Row row : friendRows)
 		{
 			if (!grouped.contains(row.friendKey))
@@ -522,6 +556,14 @@ class ListReorderer
 			}
 		}
 
+		// Offline last, so the online friends keep the top of the list.
+		if (!offlineRows.isEmpty())
+		{
+			final Section offline = new Section(Kind.OFFLINE, null, manager.isOfflineCollapsed());
+			offline.members.addAll(offlineRows);
+			sections.add(offline);
+		}
+
 		return sections;
 	}
 
@@ -533,9 +575,10 @@ class ListReorderer
 		for (int[] hs : headerSlots)
 		{
 			final Section section = sections.get(hs[1]);
+			final Kind kind = section.kind;
 			final FriendGroup group = section.group;
 			final boolean collapsed = section.collapsed;
-			final String label = group != null ? group.getName() : "Ungrouped";
+			final String label = sectionLabel(kind, group);
 			final int color = group != null ? group.getColor() : 0x9F9F9F;
 
 			Widget header = pool.poll();
@@ -558,15 +601,19 @@ class ListReorderer
 			header.setXTextAlignment(WidgetTextAlignment.CENTER);
 			header.setYTextAlignment(WidgetTextAlignment.CENTER);
 
-			// Left-click toggles collapse; every header can be reordered with Move up / Move down,
-			// and real groups also offer Rename / Set color / Delete on right-click.
+			// Left-click toggles collapse; the group and Ungrouped headers can also be reordered
+			// with Move up / Move down, and real groups offer Rename / Set color / Delete too. The
+			// Offline header is pinned last, so it gets collapse alone.
 			header.clearActions();
 			header.setHasListener(true);
 			header.setNoClickThrough(true);
 			header.setAction(0, collapsed ? "Expand" : "Collapse");
-			header.setAction(1, "Move up");
-			header.setAction(2, "Move down");
-			if (group != null)
+			if (kind != Kind.OFFLINE)
+			{
+				header.setAction(1, "Move up");
+				header.setAction(2, "Move down");
+			}
+			if (kind == Kind.GROUP)
 			{
 				header.setAction(3, "Rename");
 				header.setAction(4, "Set color");
@@ -574,7 +621,7 @@ class ListReorderer
 				// friends-list row whose option is exactly "Delete".
 				header.setAction(5, "Delete group");
 			}
-			header.setOnOpListener((JavaScriptCallback) e -> onHeaderOp(e.getOp(), group, collapsed));
+			header.setOnOpListener((JavaScriptCallback) e -> onHeaderOp(e.getOp(), kind, group, collapsed));
 			forwardScroll(header, list, rowHeight);
 			header.revalidate();
 		}
@@ -584,6 +631,19 @@ class ListReorderer
 		{
 			park(stale);
 			headers.add(stale);
+		}
+	}
+
+	private static String sectionLabel(Kind kind, FriendGroup group)
+	{
+		switch (kind)
+		{
+			case OFFLINE:
+				return "Offline";
+			case UNGROUPED:
+				return "Ungrouped";
+			default:
+				return group.getName();
 		}
 	}
 
@@ -828,9 +888,10 @@ class ListReorderer
 	}
 
 	/**
-	 * Keys of members the game reports as offline (no world), whose rows are hidden. Only friends
-	 * carry a world; the ignore list has none, so this is only reached when {@code hideOffline} is
-	 * on (never for the ignore list) and any non-{@link Friend} member is treated as present.
+	 * Keys of members the game reports as offline (no world), whose rows are hidden or gathered into
+	 * the Offline section. Only friends carry a world; the ignore list has none, so this is only
+	 * reached when {@link OfflineDisplay} is not {@link OfflineDisplay#IN_GROUP} (never for the
+	 * ignore list) and any non-{@link Friend} member is treated as present.
 	 */
 	private Set<String> offlineKeys()
 	{

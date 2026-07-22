@@ -146,6 +146,7 @@ class GroupListView extends JPanel
 
 	private final GroupStore manager;
 	private final ColorPickerManager colorPickerManager;
+	private final FriendGroupsConfig config;
 	private final GroupList list;
 	private final boolean showWorlds;
 
@@ -170,10 +171,12 @@ class GroupListView extends JPanel
 	/** Hops to the given world when a friend row is double-clicked; null when hopping is unavailable. */
 	private IntConsumer onHop;
 
-	GroupListView(GroupStore manager, ColorPickerManager colorPickerManager, GroupList list)
+	GroupListView(GroupStore manager, ColorPickerManager colorPickerManager, FriendGroupsConfig config,
+		GroupList list)
 	{
 		this.manager = manager;
 		this.colorPickerManager = colorPickerManager;
+		this.config = config;
 		this.list = list;
 		this.showWorlds = list.tracksOnline;
 
@@ -353,6 +356,7 @@ class GroupListView extends JPanel
 		}
 
 		final List<FriendGroup> groups = manager.getGroups();
+		final OfflineDisplay offlineDisplay = list.offlineDisplay(config);
 
 		final Set<String> grouped = new HashSet<>();
 		for (FriendGroup group : groups)
@@ -366,10 +370,25 @@ class GroupListView extends JPanel
 		final List<String> ungrouped = new ArrayList<>();
 		for (String name : memberNames)
 		{
-			if (!grouped.contains(GroupStore.key(name)) && matches(name))
+			if (!grouped.contains(GroupStore.key(name)) && matches(name) && isShownInPlace(name, offlineDisplay))
 			{
 				ungrouped.add(name);
 			}
+		}
+
+		// Collected from the whole list rather than per section, so a friend in two groups is
+		// listed here once.
+		final List<String> offline = new ArrayList<>();
+		if (offlineDisplay == OfflineDisplay.SEPARATE_GROUP)
+		{
+			for (String name : memberNames)
+			{
+				if (!isOnline(name) && matches(name))
+				{
+					offline.add(name);
+				}
+			}
+			offline.sort(String::compareToIgnoreCase);
 		}
 
 		final boolean filtering = !filter.isEmpty();
@@ -386,7 +405,7 @@ class GroupListView extends JPanel
 			{
 				content.add(ungroupedSection(ungrouped, null));
 			}
-			else if (filtering)
+			else if (filtering && offline.isEmpty())
 			{
 				content.add(hint(noMatchesText()));
 			}
@@ -432,7 +451,12 @@ class GroupListView extends JPanel
 						continue;
 					}
 
-					final JPanel section = groupSection(group, members, reorderPane);
+					// Offline members may be listed elsewhere, but the section still stands so the
+					// group stays editable - its count reports the full membership.
+					final List<String> rows = new ArrayList<>(members);
+					rows.removeIf(member -> !isShownInPlace(member, offlineDisplay));
+
+					final JPanel section = groupSection(group, members, rows, reorderPane);
 					section.putClientProperty(GROUP_NAME_KEY, group.getName());
 					host.add(section);
 					shown++;
@@ -441,13 +465,22 @@ class GroupListView extends JPanel
 
 			if (shown == 0)
 			{
-				content.add(hint(noMatchesText()));
+				if (offline.isEmpty())
+				{
+					content.add(hint(noMatchesText()));
+				}
 			}
 			else
 			{
 				content.add(host);
 				content.add(Box.createRigidArea(new Dimension(0, 4)));
 			}
+		}
+
+		if (!offline.isEmpty())
+		{
+			content.add(offlineSection(offline));
+			content.add(Box.createRigidArea(new Dimension(0, 4)));
 		}
 
 		content.revalidate();
@@ -492,10 +525,13 @@ class GroupListView extends JPanel
 	}
 
 	/**
-	 * @param members     the group's members to show, already sorted and filtered
+	 * @param members     the group's members, already sorted and search-filtered; drives the count
+	 * @param rows        the subset to actually list here, which omits offline members when they are
+	 *                    hidden or shown in their own section
 	 * @param reorderPane the pane to drag within, or null when reordering is off (a filter is active)
 	 */
-	private JPanel groupSection(FriendGroup group, List<String> members, DragAndDropReorderPane reorderPane)
+	private JPanel groupSection(FriendGroup group, List<String> members, List<String> rows,
+		DragAndDropReorderPane reorderPane)
 	{
 		final String name = group.getName();
 
@@ -581,14 +617,16 @@ class GroupListView extends JPanel
 			memberList.setLayout(new BoxLayout(memberList, BoxLayout.Y_AXIS));
 			memberList.setOpaque(false);
 
-			for (String member : members)
+			for (String member : rows)
 			{
 				memberList.add(memberRow(member, name));
 			}
 
 			if (memberList.getComponentCount() == 0)
 			{
-				memberList.add(hint("No " + memberNoun() + "s in this group."));
+				memberList.add(hint(members.isEmpty()
+					? "No " + memberNoun() + "s in this group."
+					: "No online " + memberNoun() + "s in this group."));
 			}
 			section.add(memberList, BorderLayout.CENTER);
 		}
@@ -648,6 +686,63 @@ class GroupListView extends JPanel
 
 		section.add(memberList, BorderLayout.CENTER);
 		return section;
+	}
+
+	/**
+	 * The "Offline" bucket: every offline member, gathered out of their groups by
+	 * {@link OfflineDisplay#SEPARATE_GROUP}. Pinned below the other sections, so it has no grip
+	 * handle; its collapse state is the one the in-game header toggles.
+	 */
+	private JPanel offlineSection(List<String> offline)
+	{
+		final boolean collapsed = manager.isOfflineCollapsed();
+
+		final JLabel heading = new JLabel("Offline  " + offline.size());
+		heading.setIcon(collapsed ? EXPAND_ICON : COLLAPSE_ICON);
+		heading.setIconTextGap(4);
+		setBoldFont(heading, SECTION_TITLE_SIZE);
+		heading.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		heading.setToolTipText(collapsed ? "Expand" : "Collapse");
+		heading.setBorder(new EmptyBorder(2, 4, 2, 2));
+		heading.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				manager.setOfflineCollapsed(!collapsed);
+			}
+		});
+
+		final JPanel section = boundedPanel();
+		section.setOpaque(true);
+		section.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		section.setBorder(BorderFactory.createMatteBorder(0, 0, 4, 0, ColorScheme.DARK_GRAY_COLOR));
+		section.add(heading, BorderLayout.NORTH);
+
+		if (!collapsed)
+		{
+			final JPanel memberList = new JPanel();
+			memberList.setLayout(new BoxLayout(memberList, BoxLayout.Y_AXIS));
+			memberList.setOpaque(false);
+			for (String name : offline)
+			{
+				// No group name: this bucket cuts across every group, so there is no single one
+				// for the row's remove button to act on.
+				memberList.add(memberRow(name, null));
+			}
+			section.add(memberList, BorderLayout.CENTER);
+		}
+
+		return section;
+	}
+
+	/**
+	 * Whether a member is listed under their own group (or Ungrouped), rather than pulled out of it
+	 * by the offline display mode.
+	 */
+	private boolean isShownInPlace(String member, OfflineDisplay offlineDisplay)
+	{
+		return offlineDisplay == OfflineDisplay.IN_GROUP || isOnline(member);
 	}
 
 	/**

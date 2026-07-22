@@ -93,10 +93,11 @@ class FriendGroupsPanel extends PluginPanel
 	FriendGroupsPanel(
 		@Named("friendGroups") GroupStore friendStore,
 		@Named("ignoreGroups") GroupStore ignoreStore,
-		ColorPickerManager colorPickerManager)
+		ColorPickerManager colorPickerManager,
+		FriendGroupsConfig config)
 	{
-		this.friendsView = new GroupListView(friendStore, colorPickerManager, GroupList.FRIENDS);
-		this.ignoreView = new GroupListView(ignoreStore, colorPickerManager, GroupList.IGNORE);
+		this.friendsView = new GroupListView(friendStore, colorPickerManager, config, GroupList.FRIENDS);
+		this.ignoreView = new GroupListView(ignoreStore, colorPickerManager, config, GroupList.IGNORE);
 
 		setLayout(new BorderLayout(0, 6));
 		setBorder(new EmptyBorder(8, 8, 8, 8));
