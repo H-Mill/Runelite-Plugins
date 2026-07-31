@@ -37,6 +37,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.VarClientIntChanged;
 import net.runelite.api.gameval.VarClientID;
+import net.runelite.client.events.RuneScapeProfileChanged;
 
 /**
  * End-to-end coverage of the everyday triggers that must (re)apply the in-game layout, driving the
@@ -46,7 +47,8 @@ import net.runelite.api.gameval.VarClientID;
  *       {@link FriendGroupsPlugin#shouldRebuildOnSort} covers;</li>
  *   <li>config changes that alter an in-game view (each list's marker, plus the friends-only offline
  *       display and world prefix); and</li>
- *   <li>logging in.</li>
+ *   <li>logging in; and</li>
+ *   <li>the active character changing, which swaps in that character's groups.</li>
  * </ul>
  * These complement the pure-logic {@link SortRebuildTest} by proving the wiring from event to a real
  * update-script run, not just the decision.
@@ -197,5 +199,37 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 
 		verifyFriendsListRebuilt();
 		verifyIgnoreListRebuilt();
+	}
+
+	// ---- character change ----
+
+	@Test
+	public void characterChangeReloadsBothStoresAndReappliesBothLayouts()
+	{
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		stubStoresEmpty();
+		runClientThreadInline();
+
+		plugin.onRuneScapeProfileChanged(new RuneScapeProfileChanged(null, "rsprofile.0123456789abcdef"));
+
+		// Groups are stored per character, so the new character's are loaded and drawn in their lists.
+		verify(friendStore).load();
+		verify(ignoreStore).load();
+		verifyFriendsListRebuilt();
+		verifyIgnoreListRebuilt();
+	}
+
+	@Test
+	public void logoutReloadsBothStoresOntoNoCharacter()
+	{
+		when(client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
+
+		plugin.onRuneScapeProfileChanged(new RuneScapeProfileChanged("rsprofile.0123456789abcdef", null));
+
+		// The previous character's groups are dropped rather than left showing for the next one.
+		verify(friendStore).load();
+		verify(ignoreStore).load();
+		// Logged out there is no list to redraw.
+		verify(clientThread, never()).invokeLater(any(Runnable.class));
 	}
 }

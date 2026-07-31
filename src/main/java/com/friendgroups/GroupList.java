@@ -68,6 +68,7 @@ enum GroupList
 		"ungroupedOrder",
 		"ungroupedCollapsed",
 		"offlineCollapsed",
+		"groupsSeeded",
 		true)
 	{
 		@Override
@@ -110,6 +111,7 @@ enum GroupList
 		"ignoreUngroupedOrder",
 		"ignoreUngroupedCollapsed",
 		"ignoreOfflineCollapsed",
+		"ignoreGroupsSeeded",
 		false)
 	{
 		@Override
@@ -147,18 +149,23 @@ enum GroupList
 	final int sortVar;
 	/** The right-click option present on a real row, used to attach the "Assign group" submenu. */
 	final String anchorOption;
-	/** Config keys this list's {@link GroupStore} persists under (all within the plugin's config group). */
+	/**
+	 * Config keys this list's {@link GroupStore} persists under (all within the plugin's config group,
+	 * and all under the active RuneScape profile, so groups are per character).
+	 */
 	final String groupsKey;
 	final String ungroupedOrderKey;
 	final String ungroupedCollapsedKey;
 	/** Collapse state of the "Offline" section; unused by the ignore list, which never shows one. */
 	final String offlineCollapsedKey;
+	/** Marks a character as already seeded from the pre-per-character groups; see {@link GroupStore}. */
+	final String seededKey;
 	/** Whether rows carry an online world; false for the ignore list, which has no online status. */
 	final boolean tracksOnline;
 
 	GroupList(String label, int interfaceGroup, int listWidget, int scrollbar, int updateScript,
 		int[] rebuildArgs, int sortVar, String anchorOption, String groupsKey, String ungroupedOrderKey,
-		String ungroupedCollapsedKey, String offlineCollapsedKey, boolean tracksOnline)
+		String ungroupedCollapsedKey, String offlineCollapsedKey, String seededKey, boolean tracksOnline)
 	{
 		this.label = label;
 		this.interfaceGroup = interfaceGroup;
@@ -172,6 +179,7 @@ enum GroupList
 		this.ungroupedOrderKey = ungroupedOrderKey;
 		this.ungroupedCollapsedKey = ungroupedCollapsedKey;
 		this.offlineCollapsedKey = offlineCollapsedKey;
+		this.seededKey = seededKey;
 		this.tracksOnline = tracksOnline;
 	}
 

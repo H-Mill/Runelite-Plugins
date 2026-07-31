@@ -44,6 +44,19 @@ Friends in more than one group show up under each of their groups, and offline g
 tidy themselves away. The **Ungrouped** header can be collapsed and moved just like a
 real group.
 
+## Groups are per character
+
+Your groups belong to the character you made them on, just like the game's own friends
+and ignore lists — log in on an alt and you get that account's own groups to organize.
+Groups you had before this became per-character are copied onto each character the first
+time you log in on it, so nothing disappears; from there each character's groups are
+edited independently. Leagues, beta and tournament worlds count as their own characters
+and keep their own groups.
+
+The settings below are the exception: they are shared by every character on this RuneLite
+profile. If you want those to differ per character too, use RuneLite's own profiles
+(**Settings → Profiles**) and make one the default for an account.
+
 ## Settings
 
 - **Side Panel Priority** — where the Friend Groups icon sits in the RuneLite sidebar.

@@ -47,6 +47,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import org.mockito.stubbing.Answer;
 import net.runelite.client.config.ConfigManager;
@@ -55,8 +57,10 @@ import net.runelite.client.config.ConfigManager;
  * Exercises the group model {@link GroupStore} owns: create/rename/delete with the
  * dedup and cap rules, the membership index the menu and in-game paths read, friend rename and
  * removal migrations, the display ordering (including the movable Ungrouped section), and the
- * config round-trip. The {@link ConfigManager} is a Mockito stub backed by an in-memory map, so
- * writes really persist and a fresh manager loading the same map reconstructs the same state.
+ * config round-trip - including the per-character storage the groups live in. The
+ * {@link ConfigManager} is a Mockito stub backed by an in-memory map standing in for one character's
+ * config, so writes really persist and a fresh manager loading the same map reconstructs the same
+ * state.
  */
 public class GroupStoreStateTest
 {
@@ -65,35 +69,46 @@ public class GroupStoreStateTest
 	private GroupStore manager;
 
 	/**
-	 * A Mockito {@link ConfigManager} that reads and writes the given map, like the real thing.
-	 *
-	 * <p>{@code setConfiguration} is overloaded: the {@code String} form takes the groups JSON while
-	 * the generic {@code <T>} form takes the ungrouped order ({@code Integer}) and collapse
-	 * ({@code Boolean}). Each is a distinct JVM method, so all three are stubbed - a single
-	 * {@code any()} stub binds only to the {@code String} overload and would silently drop the
-	 * numeric and boolean writes.
+	 * A Mockito {@link ConfigManager} whose RuneScape-profile config - where the groups live, one set
+	 * per character - reads and writes the given map, like the real thing. No profile-less config is
+	 * served, so nothing is seeded; see {@link #configSeededFrom} for that.
 	 */
 	private static ConfigManager configBackedBy(Map<String, Object> store)
 	{
+		return configBackedBy(store, new HashMap<>());
+	}
+
+	/**
+	 * As {@link #configBackedBy}, with {@code shared} standing in for the profile-less config the
+	 * plugin used to keep its groups in, which a character is seeded from the first time it loads.
+	 */
+	private static ConfigManager configSeededFrom(Map<String, Object> shared, Map<String, Object> store)
+	{
+		return configBackedBy(store, shared);
+	}
+
+	private static ConfigManager configBackedBy(Map<String, Object> store, Map<String, Object> shared)
+	{
 		final ConfigManager cm = mock(ConfigManager.class);
 		final String group = FriendGroupsConfig.GROUP;
+
+		// A character is active, so the store loads and persists rather than sitting inactive.
+		when(cm.getRSProfileKey()).thenReturn("rsprofile.0123456789abcdef");
 
 		final Answer<Void> put = inv ->
 		{
 			store.put(inv.getArgument(1), inv.getArgument(2));
 			return null;
 		};
-		doAnswer(put).when(cm).setConfiguration(eq(group), anyString(), anyString());
-		doAnswer(put).when(cm).setConfiguration(eq(group), anyString(), any(Integer.class));
-		doAnswer(put).when(cm).setConfiguration(eq(group), anyString(), any(Boolean.class));
+		doAnswer(put).when(cm).setRSProfileConfiguration(eq(group), anyString(), any());
 
 		doAnswer(inv ->
 		{
 			store.remove(inv.getArgument(1));
 			return null;
-		}).when(cm).unsetConfiguration(eq(group), anyString());
+		}).when(cm).unsetRSProfileConfiguration(eq(group), anyString());
 
-		when(cm.getConfiguration(eq(group), anyString())).thenAnswer(inv ->
+		when(cm.getRSProfileConfiguration(eq(group), anyString())).thenAnswer(inv ->
 		{
 			final Object v = store.get(inv.getArgument(1));
 			return v == null ? null : v.toString();
@@ -101,8 +116,34 @@ public class GroupStoreStateTest
 
 		// The typed getter's third parameter is java.lang.reflect.Type; Class implements Type, so
 		// this binds to it and serves the Integer/Boolean reads.
-		when(cm.getConfiguration(eq(group), anyString(), any(Class.class))).thenAnswer(inv ->
-			store.get(inv.getArgument(1)));
+		when(cm.getRSProfileConfiguration(eq(group), anyString(), any(Class.class))).thenAnswer(inv ->
+		{
+			final Object value = store.get(inv.getArgument(1));
+			if (!(value instanceof String))
+			{
+				return value;
+			}
+
+			// Config holds every value as a string - which is what a seeded value arrives as - and the
+			// real manager parses it on the way out.
+			final Object type = inv.getArgument(2);
+			if (type == Boolean.class)
+			{
+				return Boolean.valueOf((String) value);
+			}
+			if (type == Integer.class)
+			{
+				return Integer.valueOf((String) value);
+			}
+			return value;
+		});
+
+		// The pre-per-character groups, read only while seeding a character that has none.
+		when(cm.getConfiguration(eq(group), anyString())).thenAnswer(inv ->
+		{
+			final Object v = shared.get(inv.getArgument(1));
+			return v == null ? null : v.toString();
+		});
 
 		return cm;
 	}
@@ -625,8 +666,102 @@ public class GroupStoreStateTest
 		assertTrue(friends2.groupsFor("Bot123").isEmpty());
 	}
 
+	// ---- per-character storage ----
+
+	@Test
+	public void firstLoadSeedsTheCharacterFromTheSharedGroups()
+	{
+		final Map<String, Object> shared = new HashMap<>();
+		shared.put("groups", "[{\"name\":\"PvM\",\"color\":2,\"members\":[\"Zezima\"]}]");
+		shared.put("ungroupedOrder", "0");
+		shared.put("ungroupedCollapsed", "true");
+
+		final Map<String, Object> character = new HashMap<>();
+		final GroupStore m = new GroupStore(configSeededFrom(shared, character), new Gson(), GroupList.FRIENDS);
+		m.load();
+
+		// The groups a user had before this was per character follow them onto it, ordering and all.
+		assertEquals(Arrays.asList("PvM"), namesOf(m));
+		assertEquals(Arrays.asList("PvM"), groupNamesOf(m, "Zezima"));
+		assertEquals(0, m.ungroupedPosition());
+		assertTrue(m.isUngroupedCollapsed());
+		// ...and are now the character's own copy.
+		assertTrue(character.containsKey("groups"));
+	}
+
+	@Test
+	public void seededGroupsStayDeletedAcrossReloads()
+	{
+		final Map<String, Object> shared = new HashMap<>();
+		shared.put("groups", "[{\"name\":\"PvM\",\"color\":2,\"members\":[\"Zezima\"]}]");
+
+		final Map<String, Object> character = new HashMap<>();
+		final GroupStore m = new GroupStore(configSeededFrom(shared, character), new Gson(), GroupList.FRIENDS);
+		m.load();
+		m.deleteGroup("PvM");
+
+		// Seeding is a one-off per character: a second load must not resurrect what they deleted.
+		final GroupStore reloaded = new GroupStore(configSeededFrom(shared, character), new Gson(), GroupList.FRIENDS);
+		reloaded.load();
+
+		assertTrue(reloaded.getGroups().isEmpty());
+	}
+
+	@Test
+	public void charactersSeededFromTheSameGroupsThenDiverge()
+	{
+		final Map<String, Object> shared = new HashMap<>();
+		shared.put("groups", "[{\"name\":\"PvM\",\"color\":2,\"members\":[\"Zezima\"]}]");
+
+		final Map<String, Object> main = new HashMap<>();
+		final Map<String, Object> alt = new HashMap<>();
+		final GroupStore mainStore = new GroupStore(configSeededFrom(shared, main), new Gson(), GroupList.FRIENDS);
+		final GroupStore altStore = new GroupStore(configSeededFrom(shared, alt), new Gson(), GroupList.FRIENDS);
+		mainStore.load();
+		altStore.load();
+
+		mainStore.addGroup("Raids");
+		altStore.deleteGroup("PvM");
+		altStore.addGroup("Ironmen");
+
+		// Each character edits their own copy; neither write is visible to the other.
+		assertEquals(Arrays.asList("PvM", "Raids"), namesOf(mainStore));
+		assertEquals(Arrays.asList("Ironmen"), namesOf(altStore));
+
+		// And that is what each loads back, rather than the seed.
+		final GroupStore mainReloaded = new GroupStore(configSeededFrom(shared, main), new Gson(), GroupList.FRIENDS);
+		mainReloaded.load();
+		assertEquals(Arrays.asList("PvM", "Raids"), namesOf(mainReloaded));
+	}
+
+	@Test
+	public void withNoCharacterActiveTheStoreServesNothingAndWritesNothing()
+	{
+		final ConfigManager cm = mock(ConfigManager.class);
+		when(cm.getRSProfileKey()).thenReturn(null);
+
+		final GroupStore m = new GroupStore(cm, new Gson(), GroupList.FRIENDS);
+		m.load();
+
+		assertFalse(m.isActive());
+		assertFalse(m.addGroup("PvM"));
+		m.setUngroupedCollapsed(true);
+		assertTrue(m.getGroups().isEmpty());
+		assertFalse(m.isUngroupedCollapsed());
+
+		// Writes with no character to attribute them to would be dropped by ConfigManager, or worse,
+		// land on whichever character logs in next - so none are attempted.
+		verify(cm, never()).setRSProfileConfiguration(anyString(), anyString(), any());
+		verify(cm, never()).setConfiguration(anyString(), anyString(), anyString());
+	}
+
 	private static List<String> namesOf(GroupStore store)
 	{
 		return store.getGroups().stream().map(FriendGroup::getName).collect(Collectors.toList());
+	}
+
+	private static List<String> groupNamesOf(GroupStore store, String friend)
+	{
+		return store.groupsFor(friend).stream().map(FriendGroup::getName).collect(Collectors.toList());
 	}
 }

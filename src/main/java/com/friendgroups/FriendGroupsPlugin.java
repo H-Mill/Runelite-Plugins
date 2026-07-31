@@ -81,6 +81,7 @@ import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.OverlayMenuClicked;
+import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.game.ChatIconManager;
 import net.runelite.client.game.WorldService;
 import net.runelite.client.game.chatbox.ChatboxPanelManager;
@@ -359,12 +360,7 @@ public class FriendGroupsPlugin extends Plugin
 
 		panel.setOnOpenConfig(this::openConfiguration);
 		panel.setOnHop(this::hopTo);
-		final boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
-		SwingUtilities.invokeLater(() ->
-		{
-			panel.setLoggedIn(loggedIn);
-			panel.rebuildAll();
-		});
+		showGroups(friendStore.isActive());
 
 		refreshInGame(GroupList.FRIENDS);
 		refreshInGame(GroupList.IGNORE);
@@ -457,7 +453,7 @@ public class FriendGroupsPlugin extends Plugin
 		switch (event.getGameState())
 		{
 			case LOGGED_IN:
-				SwingUtilities.invokeLater(() -> panel.setLoggedIn(true));
+				showGroups(friendStore.isActive());
 				refreshInGame(GroupList.FRIENDS);
 				refreshInGame(GroupList.IGNORE);
 				break;
@@ -475,6 +471,32 @@ public class FriendGroupsPlugin extends Plugin
 				});
 				break;
 		}
+	}
+
+	/**
+	 * The active character changed, so both stores are reloaded onto it and everything showing their
+	 * groups is redrawn. Fires on login and logout, and on hopping between game modes - a leagues or
+	 * beta world is its own RuneScape profile, and so keeps its own groups.
+	 */
+	@Subscribe
+	public void onRuneScapeProfileChanged(RuneScapeProfileChanged event)
+	{
+		friendStore.load();
+		ignoreStore.load();
+
+		showGroups(friendStore.isActive());
+
+		refreshInGame(GroupList.FRIENDS);
+		refreshInGame(GroupList.IGNORE);
+	}
+
+	/**
+	 * Shows the loaded character's groups in the side panel, or the logged-out hint when there are
+	 * none to show.
+	 */
+	private void showGroups(boolean active)
+	{
+		SwingUtilities.invokeLater(() -> panel.setLoggedIn(active));
 	}
 
 	@Subscribe
