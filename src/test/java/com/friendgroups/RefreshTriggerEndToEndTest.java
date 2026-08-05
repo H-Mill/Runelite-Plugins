@@ -44,8 +44,8 @@ import net.runelite.api.gameval.VarClientID;
  * <ul>
  *   <li>the sort buttons, which redraw a list ungrouped and so need a forced rebuild in the cases
  *       {@link FriendGroupsPlugin#shouldRebuildOnSort} covers;</li>
- *   <li>config changes that alter an in-game view (each list's marker, plus friends-only hide-offline
- *       and world prefix); and</li>
+ *   <li>config changes that alter an in-game view (each list's marker, plus the friends-only offline
+ *       display and world prefix); and</li>
  *   <li>logging in.</li>
  * </ul>
  * These complement the pure-logic {@link SortRebuildTest} by proving the wiring from event to a real
@@ -60,7 +60,7 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 	public void friendsSortInGroupedModeRebuildsFriends()
 	{
 		when(config.inGameMarker()).thenReturn(InGameMarker.GROUPED);
-		when(config.hideOffline()).thenReturn(false);
+		when(config.offlineDisplay()).thenReturn(OfflineDisplay.IN_GROUP);
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 		runClientThreadInline();
 
@@ -85,7 +85,7 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 	public void friendsSortWithDotsAndNoHideOfflineLeavesGameSortAlone()
 	{
 		when(config.inGameMarker()).thenReturn(InGameMarker.DOT);
-		when(config.hideOffline()).thenReturn(false);
+		when(config.offlineDisplay()).thenReturn(OfflineDisplay.IN_GROUP);
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 
 		plugin.onVarClientIntChanged(new VarClientIntChanged(VarClientID.FRIENDS_SORT));
@@ -151,13 +151,13 @@ public class RefreshTriggerEndToEndTest extends PluginEndToEndHarness
 	}
 
 	@Test
-	public void hideOfflineChangeRebuildsFriends()
+	public void offlineDisplayChangeRebuildsFriends()
 	{
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 		stubStoresEmpty();
 		runClientThreadInline();
 
-		plugin.onConfigChanged(configChanged(FriendGroupsConfig.GROUP, "hideOffline"));
+		plugin.onConfigChanged(configChanged(FriendGroupsConfig.GROUP, "offlineDisplay"));
 
 		verifyFriendsListRebuilt();
 	}

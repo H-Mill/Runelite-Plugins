@@ -271,7 +271,9 @@ public class FriendGroupsPlugin extends Plugin
 	 * starts skip it. Applies to the friends list only (the ignore list is new).
 	 * <ul>
 	 *   <li>{@code reorderInGame} (boolean) -&gt; the {@link InGameMarker#GROUPED} marker mode.</li>
-	 *   <li>{@code showOffline} (boolean) -&gt; its inverse, {@code hideOffline}.</li>
+	 *   <li>{@code showOffline} (boolean) -&gt; {@code hideOffline}, itself now folded into
+	 *       {@code offlineDisplay} below.</li>
+	 *   <li>{@code hideOffline} (boolean) -&gt; {@link OfflineDisplay#HIDDEN} when set.</li>
 	 *   <li>the retired {@code TAG} ("Group names") marker -&gt; {@link InGameMarker#DOT}.</li>
 	 * </ul>
 	 */
@@ -301,6 +303,20 @@ public class FriendGroupsPlugin extends Plugin
 				configManager.setConfiguration(FriendGroupsConfig.GROUP, "hideOffline", true);
 			}
 			configManager.unsetConfiguration(FriendGroupsConfig.GROUP, "showOffline");
+		}
+
+		// Runs after the showOffline step above, so a user still on that key migrates through
+		// hideOffline to offlineDisplay in one start.
+		final String hideOffline = configManager.getConfiguration(FriendGroupsConfig.GROUP, "hideOffline");
+		if (hideOffline != null)
+		{
+			// hideOffline defaulted false, matching the offlineDisplay default; only a user who
+			// turned it on has a choice to carry over.
+			if (Boolean.parseBoolean(hideOffline))
+			{
+				configManager.setConfiguration(FriendGroupsConfig.GROUP, "offlineDisplay", OfflineDisplay.HIDDEN);
+			}
+			configManager.unsetConfiguration(FriendGroupsConfig.GROUP, "hideOffline");
 		}
 	}
 
@@ -447,11 +463,18 @@ public class FriendGroupsPlugin extends Plugin
 		{
 			SwingUtilities.invokeLater(this::rebuildNavButton);
 		}
-		else if ("hideOffline".equals(event.getKey()) || "hideWorldPrefix".equals(event.getKey()))
+		else if ("offlineDisplay".equals(event.getKey()) || "hideWorldPrefix".equals(event.getKey()))
 		{
 			// Friends list only. The rebuild redraws every friend (including ones we had hidden) at
-			// their natural positions before re-hiding, and re-strips (or restores) the world column.
+			// their natural positions before re-laying them out, and re-strips (or restores) the
+			// world column.
 			refreshInGame(GroupList.FRIENDS);
+
+			// The offline display drives the side panel's sections too.
+			if ("offlineDisplay".equals(event.getKey()))
+			{
+				SwingUtilities.invokeLater(() -> panel.rebuild(GroupList.FRIENDS));
+			}
 		}
 		else if ("inGameMarker".equals(event.getKey()))
 		{
@@ -548,8 +571,8 @@ public class FriendGroupsPlugin extends Plugin
 	/**
 	 * The Name / Recent / World / Legacy sort buttons change the list's sort var and redraw it
 	 * ungrouped, without re-applying our layout. Force a clean rebuild so the reorder re-runs from the
-	 * freshly sorted rows: in grouped mode this re-clusters them, and with hide-offline on it re-hides
-	 * the offline rows the sort redrew - otherwise they reappear.
+	 * freshly sorted rows: in grouped mode this re-clusters them, and with offline friends hidden or
+	 * separated it re-applies that to the rows the sort redrew - otherwise they revert.
 	 */
 	@Subscribe
 	public void onVarClientIntChanged(VarClientIntChanged event)
@@ -561,7 +584,8 @@ public class FriendGroupsPlugin extends Plugin
 
 		for (GroupList list : GroupList.values())
 		{
-			if (event.getIndex() == list.sortVar && shouldRebuildOnSort(list.marker(config), list.hideOffline(config)))
+			if (event.getIndex() == list.sortVar
+				&& shouldRebuildOnSort(list.marker(config), list.offlineDisplay(config)))
 			{
 				clientThread.invokeLater(() -> rebuildList(list));
 				return;
@@ -571,13 +595,13 @@ public class FriendGroupsPlugin extends Plugin
 
 	/**
 	 * Whether a sort-button click needs a forced list rebuild. Grouped mode has to re-cluster the
-	 * freshly sorted rows, and hide-offline (in any marker mode) has to re-hide the offline rows the
-	 * sort redrew - without it they reappear. Off with hide-offline disabled leaves the game's own
-	 * sorted list untouched.
+	 * freshly sorted rows, and any offline handling other than {@link OfflineDisplay#IN_GROUP} (in
+	 * any marker mode) has to re-hide or re-sink the offline rows the sort redrew - without it they
+	 * revert. Leaving both alone leaves the game's own sorted list untouched.
 	 */
-	static boolean shouldRebuildOnSort(InGameMarker marker, boolean hideOffline)
+	static boolean shouldRebuildOnSort(InGameMarker marker, OfflineDisplay offlineDisplay)
 	{
-		return marker == InGameMarker.GROUPED || hideOffline;
+		return marker == InGameMarker.GROUPED || offlineDisplay != OfflineDisplay.IN_GROUP;
 	}
 
 	@Subscribe

@@ -107,15 +107,18 @@ public interface FriendGroupsConfig extends Config
 
 	@ConfigItem(
 			position = 2,
-			keyName = "hideOffline",
-			name = "Hide offline friends",
-			description = "Hide offline friends from the in-game friends list. A group whose members are "
-			+ "all offline is hidden as a result.",
+			keyName = "offlineDisplay",
+			name = "Offline friends",
+			description = "Where offline friends go in the in-game friends list.<br>"
+			+ "'In their group' leaves them where the game puts them.<br>"
+			+ "'Offline group' pulls them out of their groups into one section at the bottom "
+			+ "(collapsible, in grouped list mode).<br>"
+			+ "'Hidden' removes them, so a group whose members are all offline disappears too.",
 			section = FRIENDS_SECTION
 	)
-	default boolean hideOffline()
+	default OfflineDisplay offlineDisplay()
 	{
-		return false;
+		return OfflineDisplay.IN_GROUP;
 	}
 
 	@ConfigItem(

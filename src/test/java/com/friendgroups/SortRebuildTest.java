@@ -32,45 +32,53 @@ import org.junit.Test;
 /**
  * A sort-button click redraws the friends list ungrouped and without our layout, so we force a
  * rebuild to re-apply it. It is needed whenever grouped mode is active (to re-cluster) or offline
- * friends are hidden (to re-hide the rows the sort redrew), but not when the game's plain sorted
- * list is exactly what should be shown.
+ * friends are hidden or separated (to re-apply that to the rows the sort redrew), but not when the
+ * game's plain sorted list is exactly what should be shown.
  */
 public class SortRebuildTest
 {
 	@Test
 	public void rebuildsInGroupedMode()
 	{
-		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.GROUPED, false));
+		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.GROUPED, OfflineDisplay.IN_GROUP));
 	}
 
 	@Test
 	public void rebuildsWhenHidingOfflineWithColoredDots()
 	{
-		// The regression: dots marker (not grouped) with hide-offline on must still re-hide.
-		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.DOT, true));
+		// The regression: dots marker (not grouped) with offline hidden must still re-hide.
+		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.DOT, OfflineDisplay.HIDDEN));
 	}
 
 	@Test
 	public void rebuildsWhenHidingOfflineWithMarkerOff()
 	{
-		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.OFF, true));
+		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.OFF, OfflineDisplay.HIDDEN));
 	}
 
 	@Test
-	public void groupedStillRebuildsRegardlessOfHideOffline()
+	public void rebuildsWhenSeparatingOfflineWithColoredDots()
 	{
-		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.GROUPED, true));
+		// Without a rebuild the sort's own order puts the offline rows back among the online ones.
+		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.DOT, OfflineDisplay.SEPARATE_GROUP));
 	}
 
 	@Test
-	public void leavesPlainSortedListAloneWhenDotsWithoutHideOffline()
+	public void groupedStillRebuildsRegardlessOfOfflineDisplay()
 	{
-		assertFalse(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.DOT, false));
+		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.GROUPED, OfflineDisplay.HIDDEN));
+		assertTrue(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.GROUPED, OfflineDisplay.SEPARATE_GROUP));
 	}
 
 	@Test
-	public void leavesPlainSortedListAloneWhenMarkerOffWithoutHideOffline()
+	public void leavesPlainSortedListAloneWhenDotsWithOfflineInGroup()
 	{
-		assertFalse(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.OFF, false));
+		assertFalse(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.DOT, OfflineDisplay.IN_GROUP));
+	}
+
+	@Test
+	public void leavesPlainSortedListAloneWhenMarkerOffWithOfflineInGroup()
+	{
+		assertFalse(FriendGroupsPlugin.shouldRebuildOnSort(InGameMarker.OFF, OfflineDisplay.IN_GROUP));
 	}
 }

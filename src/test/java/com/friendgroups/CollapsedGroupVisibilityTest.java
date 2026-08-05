@@ -80,7 +80,7 @@ public class CollapsedGroupVisibilityTest
 
 		when(client.isClientThread()).thenReturn(true);
 		when(config.inGameMarker()).thenReturn(InGameMarker.GROUPED);
-		when(config.hideOffline()).thenReturn(false);
+		when(config.offlineDisplay()).thenReturn(OfflineDisplay.IN_GROUP);
 		when(manager.isUngroupedCollapsed()).thenReturn(false);
 		when(manager.ungroupedPosition()).thenReturn(99);
 	}

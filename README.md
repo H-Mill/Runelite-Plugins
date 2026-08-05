@@ -57,7 +57,17 @@ real group.
   - `Off` — no in-game marking.
 - **Hover tooltip** — show a friend's group names when you hover over them in the
   in-game friends list.
-- **Hide offline friends** — hide offline friends from the in-game friends list. A group
-  whose members are all offline disappears until someone comes online.
+- **Offline friends** — where offline friends go in the in-game friends list:
+  - `In their group` (default) — leaves them where the game puts them.
+  - `Offline group` — pulls them out of their groups into a single section at the
+    bottom of the list. In `Grouped list` mode that section gets its own collapsible
+    header; with the marker off or on dots there are no headers, so they simply sink to
+    the bottom.
+  - `Hidden` — removes them from the list. A group whose members are all offline
+    disappears until someone comes online.
+
+  This also applies to the side panel, which grows a matching collapsible **Offline**
+  section at the bottom. Group sections stay visible there either way, so every group
+  remains editable; their counts still report the full membership.
 - **Hide "World" prefix** — show just the world number (e.g. `369`) instead of
   `World 369` in the in-game friends list.
