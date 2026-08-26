@@ -1,86 +1,305 @@
-# Friend Groups
+# Custom Weapon SFX
 
-Organize your RuneLite friends list into named, color-coded groups — perfect for
-keeping your clan, your ironman buddies, and your PvM team separate at a glance.
+Play custom sound effects when you attack or get hit in Old School RuneScape.
 
-## The side panel
+## Features
 
-Open the **Friend Groups** icon in the RuneLite sidebar to manage everything:
+- Assign sounds to specific weapons
+- Play different sounds for misses, regular hits, and max hits — on both regular and special attacks
+- **Amount triggers** — play a sound only when a hit deals more than, less than, or exactly the damage you choose, for regular and special attacks
+- Correct handling for multi-hit weapons like dragon claws, dark bow, and twinflame staff, so their attacks play one sound instead of several
+- Dedicated **Player kill** trigger that fires when your attack kills another player
+- Dedicated **Player death** trigger (Received Attacks) that fires when your character dies
+- Separate sounds for when *you* take damage (Received Attacks)
+- **Global (All Weapons)** fallback section — plays sounds for any weapon that doesn't have its own configuration for a given trigger
+- **Per-group blacklist** — exclude specific weapons from an individual Global sound group, so it plays for everything else
+- Multiple sound groups per weapon or section, each with its own triggers, sounds, volume, and activation chance
+- Multiple sounds per group — one is picked at random each time the group fires, with an adjustable **weight** to make some sounds more likely than others
+- Per-group activation chance (0–100%) for randomized playback
+- Enable or disable individual weapons and sections without losing their configuration
+- Reorder your configured weapons by dragging each row's handle
+- Use built-in sounds or drop in your own `.wav` files
+- Per-sound volume control and in-panel preview
+- Mute the game's default weapon sounds by sound ID, so your custom SFX replaces them instead of layering on top
 
-- **New group** — press the **+ New Group** button at the top to create a group.
-- **Rename / delete** — use the pencil and trash icons on each group's header.
-- **Recolor** — click the little color square next to a group to pick its color.
-- **Reorder** — drag a group by its grip handle to change the order your groups appear
-  in. The **Ungrouped** section can be dragged too, so you decide whether ungrouped
-  friends sit above, below, or in between your groups.
-- **Collapse** — click a group's name to fold it away when you don't need it.
-- **Add friends** — press the **+** next to any friend to drop them into a group (or
-  create a new group on the spot), and use the trash button to take them back out.
+## Setup
 
-Each group heading shows how many of its members are online (for example `PvM  3/8`).
-Under the heading you'll see its friends, with **online friends first** and their
-current world shown alongside. Green means they're on your world, yellow means
-they're online on a different world, and greyed-out means offline. Friends who aren't
-in any group appear under **Ungrouped**.
+1. Open the **Custom Weapon SFX** panel from the sidebar.
+2. Add a weapon — click **Add (Equipped)** while holding a weapon, or click **Add (Search)** to find one by name (requires being logged in).
+3. Expand the weapon and configure its sound group(s).
+4. To play a sound when you take damage, expand the **Received Attacks** section at the top.
+5. To play a sound for any weapon without its own configuration, expand the **Global (All Weapons)** section.
 
-A friend can belong to more than one group at once, and appears under each of them.
+### Managing weapons
 
-## In the in-game friends list
+Each weapon row has buttons to re-point or copy its configuration without rebuilding it from scratch:
 
-Your groups can also show up directly in the game's own friends list.
+- **Change (Search)** / **Change (Equipped)** — move this weapon entry to a different weapon (by name search or your currently equipped weapon), **keeping** its sound groups. Use this when, for example, you upgrade to a new version of a weapon and want to carry its sounds over.
+- **Clone (Search)** / **Clone (Equipped)** — create a *new* weapon entry that copies this weapon's settings (sound groups, triggers, volumes, weights) onto another weapon, leaving the original in place.
 
-Right-click any friend and choose **Assign group** to add them to a group, remove them
-from one, or create a brand-new group — no need to open the side panel.
+To **reorder** your weapons, drag a row by its handle (the grip icon at the left of the row's toolbar) and drop it in the new position. The order is saved automatically.
 
-With the **Grouped list** marker turned on (the default), the friends list is clustered
-under a colored header for each group, in your chosen group order. From each header you
-can:
+## Sound Groups
 
-- **Left-click** to collapse or expand that group.
-- **Right-click → Move up / Move down** to reorder groups without leaving the game.
-- **Right-click → Rename, Set color, or Delete group** to manage a group in place.
+Each weapon and section contains one or more **sound groups**. A sound group fires when its selected triggers match the outcome of an attack (see [Triggers](#triggers) for exact matching rules).
 
-Friends in more than one group show up under each of their groups, and offline groups
-tidy themselves away. The **Ungrouped** header can be collapsed and moved just like a
-real group.
+Click **+ Add Sound Group** inside an expanded weapon or section to add another group. New groups get a default name (**Sound Group 1**, **Sound Group 2**, …); click the **edit** (pencil) icon on the group header to rename it. Names must be unique within a weapon or section. Each group has:
 
-## Groups are per character
+- **Chance** — probability the group plays when its trigger fires (100% = always, 0% = never). Useful for adding occasional variation.
+- **Sound(s)** — one or more sound files; if multiple are added, one is chosen at random each time the group fires. Click the **test** icon to preview a sound.
+- **Volume** — playback volume per sound (0–100).
+- **Weight** — how likely each sound is to be picked when a group has more than one. A sound's chance is its weight divided by the total of all weights in the group, and the **%** beside it shows the resulting chance. Leave them all equal for an even random pick, or raise one to make it play more often.
+- **Triggers** — which hit outcomes cause this group to fire (see below).
 
-Your groups belong to the character you made them on, just like the game's own friends
-and ignore lists — log in on an alt and you get that account's own groups to organize.
-Groups you had before this became per-character are copied onto each character the first
-time you log in on it, so nothing disappears; from there each character's groups are
-edited independently. Leagues, beta and tournament worlds count as their own characters
-and keep their own groups.
+Click **+ Add Sound** inside a group to add more sounds to the random pool. Sound groups can be removed with the **delete** (trash) icon on the group header, including the last remaining one.
 
-The settings below are the exception: they are shared by every character on this RuneLite
-profile. If you want those to differ per character too, use RuneLite's own profiles
-(**Settings → Profiles**) and make one the default for an account.
+Click the **test** icon on the group header to test the whole group. It rolls the group's chance, then plays one sound picked by weight at that sound's volume — so you can preview the combined effect of chance, weights, and volume. (Because it rolls the chance, a group set below 100% may play nothing on some presses.)
 
-## Settings
+Multiple sound groups on the same weapon (or section) with matching triggers all fire together, so you can define two or more groups with the same trigger to play several SFX at once. (A single group with multiple sounds plays just *one* of them at random — use separate groups when you want every sound to play.)
 
-- **Side Panel Priority** — where the Friend Groups icon sits in the RuneLite sidebar.
-  A lower number moves it higher up.
-- **In-game marker** — how your groups appear in the in-game friends list:
-  - `Grouped list` (default) — clusters your friends under a colored header for each
-    group. This takes over the game's Name / Recent / World sorting, applying your sort
-    within each group instead.
-  - `Colored dots` — leaves the list as-is and adds a small colored dot for each group
-    next to a friend's name.
-  - `Off` — no in-game marking.
-- **Hover tooltip** — show a friend's group names when you hover over them in the
-  in-game friends list.
-- **Offline friends** — where offline friends go in the in-game friends list:
-  - `In their group` (default) — leaves them where the game puts them.
-  - `Offline group` — pulls them out of their groups into a single section at the
-    bottom of the list. In `Grouped list` mode that section gets its own collapsible
-    header; with the marker off or on dots there are no headers, so they simply sink to
-    the bottom.
-  - `Hidden` — removes them from the list. A group whose members are all offline
-    disappears until someone comes online.
+## Triggers
 
-  This also applies to the side panel, which grows a matching collapsible **Offline**
-  section at the bottom. Group sections stay visible there either way, so every group
-  remains editable; their counts still report the full membership.
-- **Hide "World" prefix** — show just the world number (e.g. `369`) instead of
-  `World 369` in the in-game friends list.
+Weapons and the **Global (All Weapons)** section offer these triggers:
+
+| Trigger | When it fires |
+|---|---|
+| Regular attack zero | Regular attack that deals 0 damage |
+| Regular attack max | Regular attack that is a max hit |
+| Regular attack amount | Regular attack that deals more than, less than, or exactly a chosen amount |
+| Special attack zero | Special attack that deals 0 damage |
+| Special attack hit | Special attack that deals non-max damage |
+| Special attack max | Special attack that is a max hit |
+| Special attack amount | Special attack that deals more than, less than, or exactly a chosen amount |
+| All attacks | Every attack, including zero-damage hits |
+| Player kill | Your attack kills another player |
+
+The **Received Attacks** section has its own set: Regular attack zero, **Regular attack hit** (any non-max damage you take), All attacks, and Player death.
+
+### Amount triggers
+
+**Regular attack amount** and **Special attack amount** play a sound based on how much damage a hit deals. When you enable one, pick an option — more than (`>`), less than (`<`), or exactly (`=`) — and type a number. For example, set `= 73` to play a sound on an exact 73, or `> 50` for any big hit.
+
+Regular attack amount reacts to your regular attacks; Special attack amount reacts to your special attacks. For weapons that hit more than once in a single attack, it's the combined damage of that attack that's checked.
+
+### Multi-hit weapons
+
+Some weapons hit several times in one attack, and those hits can land a little apart. The plugin treats these as a single attack so you get one sound for the whole thing instead of several. This applies to:
+
+- **Dragon claws** and **Burning claws** (special attack)
+- **Dark bow** (every attack)
+- **Twinflame staff** (every cast)
+
+### Player kill trigger
+
+The **Player kill** trigger fires when your hit reduces another player's health to zero. It only works in PvP (wilderness, PvP worlds, etc.) — NPC kills do not activate it.
+
+**Priority:** when a weapon has at least one group with Player kill enabled, that group takes exclusive priority on kills. All other groups on that weapon are suppressed for that attack, even if their own triggers would have matched.
+
+**Combining with damage triggers:** if you add Player kill to a group alongside one or more damage triggers (Regular attack max, Special attack hit, Special attack max, etc.), **both conditions must be met** for the group to fire. For example:
+
+- `Player kill` + `Special attack max` → fires only when you kill a player with a special attack max hit
+- `Player kill` + `Regular attack max` + `Special attack max` → fires when you kill a player with either a regular or special max hit
+- `Player kill` alone → fires on any killing blow, regardless of hit type
+
+This lets you set up a generic kill sound alongside a more specific one for, say, a one-shot special — only the most specific matching group fires.
+
+### Player death trigger
+
+The **Player death** trigger is available only in the **Received Attacks** section. It fires when your character dies, regardless of what killed you (another player, an NPC, poison, etc.).
+
+It fires independently of the hitsplat system — a death from poison or a delayed hit will still trigger it. It cannot be added to weapon sound groups.
+
+When Player death fires, all other Received Attacks triggers are suppressed for that same hit. Only the death sound plays.
+
+## Global (All Weapons)
+
+The **Global (All Weapons)** section acts as a fallback for any weapon hit that is not handled by a weapon-specific sound group.
+
+When your attack lands, the plugin checks whether the weapon you used has a group configured for that trigger. **By default, weapon-specific triggers override global triggers:** if the weapon has a group for that trigger, the weapon-specific group fires and the matching global group is suppressed for that trigger so the two do not stack. If it does not, the global group fires instead.
+
+This lets you set a single default "on hit" sound that plays for every weapon, then override it selectively for specific weapons.
+
+If you would rather have both the weapon-specific and global sounds play for overlapping triggers, enable that weapon's **Don't override Global** toggle (see below).
+
+**Example:** configure a generic hit sound in Global with the *All attacks* trigger. Add your scythe with only a *Regular attack max* group. Scythe max hits play the scythe sound; every other hit type on the scythe, and all hits with any other weapon, play the global sound.
+
+The global section only fires for outgoing hits — it is not affected by incoming damage.
+
+### Blacklisting weapons from a Global group
+
+Each **Global (All Weapons)** sound group has its own **Blacklist** — a list of weapons that group will *not* play for. Use it when a global sound suits most of your weapons but you want a handful excluded, without having to give those weapons their own configuration.
+
+Expand a Global sound group to find its **Blacklist** row, then add weapons the same way you add them elsewhere:
+
+- **Search** (magnifying-glass icon) — find a weapon by name (requires being logged in).
+- **Add (Equipped)** (plus icon) — blacklist your currently equipped weapon.
+- **Delete** (trash icon) — remove a weapon from the list.
+
+When you attack with a blacklisted weapon, that group is skipped. **Only that one group is affected** — the weapon still plays its own weapon-specific sounds and any *other* Global groups it isn't blacklisted from. The blacklist is per group, so the same weapon can be excluded from one Global group while still playing another.
+
+**Example:** you have a Global *Special attack max* group with a generic max-hit sound. Add your Zaryte crossbow (ZCB) to that group's blacklist so its spec maxes stay silent (or play only their own weapon-specific sound), while every other weapon keeps playing the global spec-max sound.
+
+## Enabling and Disabling Weapons and Sections
+
+Each weapon row, the **Received Attacks** section, and the **Global (All Weapons)** section each have a checkbox in their header. Unchecking it disables that weapon or section — its sound groups will not fire — without removing any configuration. Check it again to re-enable.
+
+## Don't override Global (per weapon)
+
+By default, when a weapon has its own sound group for a trigger, it overrides the matching **Global (All Weapons)** sound for that trigger so the two do not stack. Expand a weapon and enable its **Don't override Global** toggle to make the weapon-specific and Global sounds for the same trigger *both* play. This is configured per weapon and is disabled by default.
+
+## Using Your Own Sounds
+
+1. Place `.wav` files in `.runelite/customweaponsfx/` — click the **Open SFX folder** button (folder icon) in the panel toolbar to open it directly.
+2. Click **Refresh Sounds** in the panel.
+3. Your files will appear in the sound dropdowns alongside the built-in sounds.
+
+Need sounds to get started? I've compiled a collection of `.wav` SFX you can download and drop in: [H-Mill/Runelite-Plugins (sfx branch)](https://github.com/H-Mill/Runelite-Plugins/tree/sfx).
+
+## Options
+
+The **Options** section at the top of the panel (collapsed by default) contains three global toggles, two NPC exclusion lists, and a default-sound mute list:
+
+**Ignore max hits ≤ 3** — when enabled, max hit SFX will not play if the hit deals 3 or fewer damage. This prevents thrall max hits from triggering your *Regular/Special attack max* sounds. Enabled by default.
+
+**Ignore zeroes with prayer** — when enabled, the Received Attacks *Regular attack zero* trigger will not fire while Protect from Melee, Protect from Ranged, or Protect from Magic is active. Useful if you don't want a "blocked" sound every time a prayer absorbs a hit. Enabled by default.
+
+**Ignore zeroes with thrall** — when enabled, zero-damage triggers will not fire while a thrall is active. Prevents thrall misses from triggering zero-damage sounds. Enabled by default.
+
+### Excluding NPCs
+
+Two text fields let you stop your hits on specific NPCs from playing any SFX. Both accept a **comma-separated list** and apply only to *outgoing* hits on NPCs — your weapon, Global, and Received Attacks sounds are otherwise unaffected. Changes save automatically when you press Enter or click away from the field.
+
+**Excluded NPC IDs** — comma-separated NPC ids (e.g. `11706, 11707`). Any hit you land on a matching NPC plays no sound.
+
+**Excluded NPC Names** — comma-separated NPC names (e.g. `Vorkath, Zulrah`). Matching is **case-insensitive** and must be the NPC's full name (not a partial match). Useful when an encounter reuses the same name across several NPC ids.
+
+An NPC is excluded if it matches *either* list (or the built-in ids), so you can mix and match. Invalid or blank entries are ignored.
+
+### Muting default weapon sounds
+
+By default your custom SFX play *on top of* the game's own weapon sounds. The **Muted Weapon Sound IDs** field lets you silence the game's stock sounds so only your custom SFX is heard.
+
+Enter a **comma-separated list** of the game sound-effect ids you want muted. Any matching sound is silenced — both the sound you hear and the one nearby players hear for that effect. Changes save automatically when you press Enter or click away from the field. Invalid or blank entries are ignored.
+
+This mutes sounds purely by id, independent of which weapon is configured — so you can use it to quiet any annoying default sound, not just the weapons you've set up custom SFX for.
+
+**Common sound ids:**
+
+| Sound ID | What it is |
+|---|---|
+| `3892` | The Armadyl crossbow / Zaryte crossbow (ACB/ZCB) special attack "REEEE" sound |
+
+## Plugin Configuration
+
+A few settings live in RuneLite's standard configuration panel — click the **gear/cog icon** next to **Custom Weapon SFX** in the plugin list, or the **Open config** button (cog icon) in the side panel's toolbar, which opens the same configuration directly.
+
+**Side Panel Priority** — controls where the Custom Weapon SFX icon sits in the RuneLite sidebar relative to other plugins' icons. **Lower numbers sit higher** (closer to the top); higher numbers sit lower. The default is `1`. Changing it reorders the icon.
+
+## Resetting
+
+Click **Reset All Data** to clear all weapons and sound groups and restore defaults. A confirmation dialog will appear first.
+
+## Known Issues
+
+**Thrall hits** — if you have a thrall active and a *Regular attack zero* or *All attacks* trigger set, thrall zeros and damage will cause the sound to play. Thrall hits are indistinguishable from player hits in the data provided by the game client, so this cannot be fully filtered out. The **Ignore max hits ≤ 3** and **Ignore zeroes with thrall** toggles mitigate thrall hits specifically.
+
+**Splashing** - Your players splashing, like thrall zeros, cannot be distinguished from other players splashes, so I opted to not include them in the plugin (everyones splashes around you would cause a SFX).
+
+## Version History
+
+### 2.13
+
+- Add a **per-group blacklist** to the **Global (All Weapons)** section — each Global sound group can now exclude specific weapons, so the group plays for every weapon *except* the ones you list. Expand a Global group to find its **Blacklist** row, then add weapons by name **Search** or **Add (Equipped)**, and remove them with the **delete** icon. Only the group you blacklist a weapon from is skipped — the weapon still plays its own sounds and any other Global groups. The blacklist is saved per group.
+
+### 2.12
+
+- Add **Regular attack amount** and **Special attack amount** triggers — play a sound only when a hit deals more than, less than, or exactly the damage you choose. Enable the trigger, pick `>`, `<`, or `=`, and type a number (e.g. `= 73` for an exact hit, or `> 50` for any big hit).
+- Add correct handling for multi-hit weapons whose hits can land a little apart — **dragon claws**, **burning claws**, **dark bow**, and **twinflame staff**. Their attacks now play one sound for the whole attack instead of several.
+
+### 2.11
+
+- **Reorder weapons by dragging** — each weapon row has a drag handle (grip icon at the left of its toolbar); drag a row and drop it to change the order. The new order is saved automatically.
+- Move **Don't override Global** from a single global toggle to a per-weapon setting — expand a weapon to enable it just for that weapon, so its triggers and the matching Global (All Weapons) triggers both play.
+- Add a **Muted Weapon Sound IDs** field to the Options section — a comma-separated list of game sound-effect ids to silence, so your custom SFX replaces the game's default weapon sound instead of playing over it. Mutes both your own sound and the area sound nearby players hear, by id. For example, id `3892` mutes the ACB/ZCB special attack "REEEE" sound.
+
+### 2.10
+
+- Add an **Open SFX folder** button (folder icon) to the panel toolbar that opens `.runelite/customweaponsfx/` directly, so you no longer have to find the folder yourself to drop in custom `.wav` files.
+- Add an **Open config** button (cog icon) to the panel toolbar that opens the plugin's RuneLite configuration directly, instead of having to find the gear icon in the plugin list.
+- Weapon-specific **Change** buttons — re-point an existing weapon entry at a different weapon while keeping all of its sound groups:
+  - **Change (Search)** — pick the new weapon by name search.
+  - **Change (Equipped)** — switch the entry to your currently equipped weapon.
+- Weapon-specific **Clone** buttons — copy an existing weapon's settings (sound groups, triggers, volumes, weights) onto another weapon:
+  - **Clone (Search)** — clone the settings onto a weapon picked by name search.
+  - **Clone (Equipped)** — clone the settings onto your currently equipped weapon.
+- UI and icon updates.
+
+### 2.9
+
+- Add a **Weight** control to each sound in a group with multiple sounds. Set how likely each sound is to play relative to the others — the **%** beside it shows the resulting chance. Existing groups keep an even random pick.
+- Add a **test** button to each sound group header that rolls the group's chance and plays a weighted sound at its volume, so you can preview chance, weights, and volume together. The per-sound preview button now uses the same icon in place of the previous Unicode glyph.
+- Each sound now sits in its own box in the panel to make multi-sound groups easier to read.
+
+### 2.8
+
+- Add a **Side Panel Priority** setting (in the plugin's config cog) to control where the Custom Weapon SFX icon sits in the RuneLite sidebar. Lower numbers sit higher; changes apply instantly without a restart.
+- Small UI updates
+
+### 2.7
+
+- Fix the wrong sound playing on a ranged/magic hit when you switch weapons right after attacking. The hit now plays the sound of the weapon you actually attacked with.
+
+### 2.6
+
+- Add **Don't override Global** option — when enabled, weapon-specific triggers no longer override the matching Global (All Weapons) triggers, so both sounds play. Disabled by default.
+- Add more tooltips throughout the panel to better explain how things work.
+- Replace the panel's collapse, rename, and delete buttons with PNG icons in place of the previous Unicode glyphs (▶/▼, ✎, ✕), which rendered inconsistently across operating systems.
+- Fix SFX continuing to play for a weapon after it was manually unequipped.
+
+### 2.5
+
+- Sound groups can now be **renamed** — click the **✎** button on a group header to give it a custom name. Names are saved to your config and must be unique within each weapon or section. The delete confirmation now shows the group's name.
+- Add **Excluded NPC IDs** and **Excluded NPC Names** lists to the Options section — comma-separated entries that stop your hits on the listed NPCs from playing any SFX. Name matching is case-insensitive.
+
+### 2.4
+
+Internal refactor — no user-facing changes. Extracted config persistence into a single `CustomWeaponSfxConfigStore`, split the per-tick hit aggregation out of the plugin into `HitAggregator`, collapsed the five option toggles behind an `SfxOption` enum, and replaced the hardcoded special-attack varp with the `VarPlayerID.SA_ENERGY` gameval constant. Removed the unused update-notification panel.
+
+### 2.3
+
+- Fix wrong weapon sound playing when switching weapons before the hitsplat lands (ranged/magic).
+- Add **Player Kill** trigger — use it alone or with other damage triggers to play SFX when you send another player to the shadow realm.
+- Add **Player Death** trigger (Received Attacks only) — plays SFX when your character dies regardless of the cause. When it fires, all other Received Attacks triggers are suppressed for that hit.
+- Add **Global (All Weapons)** section — configure fallback sounds that play for any weapon that doesn't have its own group for a given trigger. Weapon-specific groups always take priority.
+- Add enable/disable toggles to the Received Attacks and Global (All Weapons) sections.
+- Move the three options toggles (ignore max hits ≤ 3, ignore zeroes with prayer, ignore zeroes with thrall) into a collapsible Options section.
+- Sound groups can now be deleted even when only one remains.
+- **All attacks** trigger now fires on zero-damage hits as well as non-zero hits.
+- Custom sounds: place any `.wav` file in `.runelite/customweaponsfx/`, click Refresh Sounds, and it will appear in all sound dropdowns.
+
+### 2.2
+
+Add **Ignore zeroes with thrall** toggle, until I find a better way to avoid issues with thralls (this may be never).
+
+### 2.1
+
+Add **Ignore max hits ≤ 3** and **Ignore zeroes with prayer** toggles.
+
+### 2.0
+
+Rebranded from Squeaky Toy to Custom Weapon SFX.
+
+This is a full overhaul of the original plugin, which supported only a single sound at a fixed volume triggered by all player attacks / player zeros, or all attacks received / zeros received.
+
+- Custom sounds — place `.wav` files in `.runelite/customweaponsfx/` and select them in the panel
+- Per-weapon configuration — add weapons individually by name search or by equipping them
+- Sound groups — each weapon supports multiple sound groups, each independently configured
+- Triggers — control exactly when each group fires: zero damage, regular hit, max hit, special zero, special hit, special max, or any damaging hit
+- Trigger chance — set a probability (0–100%) that a group fires when its trigger condition is met
+- Per-group volume — each group has its own volume level
+- Multi-sound groups — assign multiple sounds to a group and one is chosen at random on each fire
+- Received Attacks — a dedicated section for sounds that play when you take damage, separate from outgoing attacks
+
+### 1.0
+
+Created Squeaky Toy Plugin.
