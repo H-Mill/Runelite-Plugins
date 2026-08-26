@@ -52,7 +52,6 @@ import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
 import net.runelite.client.util.ColorUtil;
-import net.runelite.client.util.Text;
 
 /**
  * Reorders the in-game friends list into group clusters with a colored header
@@ -131,12 +130,21 @@ class ListReorderer
 		private final int originalY;
 		private final List<Widget> widgets = new ArrayList<>();
 		private String friendKey;
-		private String friendName;
 
 		private Row(int originalY)
 		{
 			this.originalY = originalY;
 		}
+	}
+
+	/**
+	 * The member keys of one list: every member, and - when the caller asks for it - those the game
+	 * reports as offline.
+	 */
+	private static final class MemberKeys
+	{
+		private final Set<String> all = new HashSet<>();
+		private final Set<String> offline = new HashSet<>();
 	}
 
 	/** What a displayed section stands for: one of the user's groups, or a built-in bucket. */
@@ -289,8 +297,8 @@ class ListReorderer
 			return;
 		}
 
-		final Set<String> friendKeys = friendKeys();
-		if (friendKeys.isEmpty())
+		final MemberKeys keys = memberKeys(offlineDisplay != OfflineDisplay.IN_GROUP);
+		if (keys.all.isEmpty())
 		{
 			return;
 		}
@@ -298,16 +306,19 @@ class ListReorderer
 		final Set<Widget> present = identitySet(children);
 
 		// Our header and clone widgets from the previous pass that are still in the tree: reuse
-		// pools, and the sets to skip while detecting the game's own rows.
+		// pools, plus one identity set of both to skip while detecting the game's own rows.
 		final Deque<Widget> pool = livingHeaders(present);
 		final Deque<Widget> clonePool = livingClones(present);
+		final Set<Widget> injected = Collections.newSetFromMap(new IdentityHashMap<>());
+		injected.addAll(pool);
+		injected.addAll(clonePool);
 
 		// Bucket the widgets into rows by their y position, and tag each row with the
 		// friend it renders by matching a child's text against the friend container.
 		final TreeMap<Integer, Row> byY = new TreeMap<>();
 		for (Widget w : children)
 		{
-			if (w == null || pool.contains(w) || clonePool.contains(w))
+			if (w == null || injected.contains(w))
 			{
 				continue;
 			}
@@ -319,10 +330,9 @@ class ListReorderer
 			if (row.friendKey == null && text != null && !text.isEmpty())
 			{
 				final String key = GroupStore.key(text);
-				if (friendKeys.contains(key))
+				if (keys.all.contains(key))
 				{
 					row.friendKey = key;
-					row.friendName = Text.toJagexName(Text.removeTags(text));
 				}
 			}
 		}
@@ -356,7 +366,7 @@ class ListReorderer
 		}
 		else
 		{
-			final Set<String> offline = offlineKeys();
+			final Set<String> offline = keys.offline;
 			for (Row row : friendRows)
 			{
 				if (!offline.contains(row.friendKey))
@@ -507,14 +517,23 @@ class ListReorderer
 		final Set<String> grouped = new HashSet<>();
 
 		// A section per group, kept even when empty so the Ungrouped position stays meaningful.
+		// Each group's members are normalized into a key set once and matched against the key the
+		// rows were already tagged with.
 		final List<Section> groupSections = new ArrayList<>(groups.size());
 		boolean anyGroupMembers = false;
 		for (FriendGroup group : groups)
 		{
 			final Section section = new Section(Kind.GROUP, group, group.isCollapsed());
+
+			final Set<String> memberKeys = new HashSet<>(group.getMembers().size());
+			for (String member : group.getMembers())
+			{
+				memberKeys.add(GroupStore.key(member));
+			}
+
 			for (Row row : friendRows)
 			{
-				if (group.contains(row.friendName))
+				if (memberKeys.contains(row.friendKey))
 				{
 					section.members.add(row);
 					grouped.add(row.friendKey);
@@ -861,58 +880,43 @@ class ListReorderer
 		return min == Integer.MAX_VALUE ? FALLBACK_ROW_HEIGHT : min;
 	}
 
-	/** Keys of every member of this list, used to recognise which rows are real. */
-	private Set<String> friendKeys()
-	{
-		final NameableContainer<? extends Nameable> container = groupList.container(client);
-		if (container == null)
-		{
-			return new HashSet<>();
-		}
-
-		final Nameable[] members = container.getMembers();
-		if (members == null)
-		{
-			return new HashSet<>();
-		}
-
-		final Set<String> keys = new HashSet<>();
-		for (Nameable member : members)
-		{
-			if (member != null && member.getName() != null)
-			{
-				keys.add(GroupStore.key(member.getName()));
-			}
-		}
-		return keys;
-	}
-
 	/**
-	 * Keys of members the game reports as offline (no world), whose rows are hidden or gathered into
-	 * the Offline section. Only friends carry a world; the ignore list has none, so this is only
-	 * reached when {@link OfflineDisplay} is not {@link OfflineDisplay#IN_GROUP} (never for the
-	 * ignore list) and any non-{@link Friend} member is treated as present.
+	 * Collects this list's member keys, used to recognise which rows are real, and - when
+	 * {@code wantOffline} - those the game reports as offline (no world), whose rows are hidden or
+	 * gathered into the Offline section. Only friends carry a world; the ignore list has none, so
+	 * offline keys are only asked for when {@link OfflineDisplay} is not
+	 * {@link OfflineDisplay#IN_GROUP} (never for the ignore list) and any non-{@link Friend} member
+	 * is treated as present.
 	 */
-	private Set<String> offlineKeys()
+	private MemberKeys memberKeys(boolean wantOffline)
 	{
+		final MemberKeys keys = new MemberKeys();
+
 		final NameableContainer<? extends Nameable> container = groupList.container(client);
 		if (container == null)
 		{
-			return new HashSet<>();
+			return keys;
 		}
 
 		final Nameable[] members = container.getMembers();
 		if (members == null)
 		{
-			return new HashSet<>();
+			return keys;
 		}
 
-		final Set<String> keys = new HashSet<>();
 		for (Nameable member : members)
 		{
-			if (member instanceof Friend && member.getName() != null && ((Friend) member).getWorld() <= 0)
+			if (member == null || member.getName() == null)
 			{
-				keys.add(GroupStore.key(member.getName()));
+				continue;
+			}
+
+			final String key = GroupStore.key(member.getName());
+			keys.all.add(key);
+
+			if (wantOffline && member instanceof Friend && ((Friend) member).getWorld() <= 0)
+			{
+				keys.offline.add(key);
 			}
 		}
 		return keys;

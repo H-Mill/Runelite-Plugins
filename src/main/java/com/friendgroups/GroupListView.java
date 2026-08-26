@@ -168,6 +168,14 @@ class GroupListView extends JPanel
 	/** Groups and members are only shown while logged in. */
 	private boolean loggedIn;
 
+	/**
+	 * Set when a {@link #rebuild()} was skipped because this view was off screen - the side panel is
+	 * closed, or the other tab is selected - and flushed as a single rebuild when it comes back. A
+	 * rebuild discards and re-creates a component per member, so it is only worth doing for a view
+	 * someone is looking at.
+	 */
+	private boolean rebuildPending;
+
 	/** Hops to the given world when a friend row is double-clicked; null when hopping is unavailable. */
 	private IntConsumer onHop;
 
@@ -204,6 +212,18 @@ class GroupListView extends JPanel
 
 		add(header, BorderLayout.NORTH);
 		add(content, BorderLayout.CENTER);
+
+		// Catch up on whatever changed while this view was hidden, the moment it is shown again.
+		// This view is hidden by a tab switch, by another plugin's panel being selected and by the
+		// sidebar being closed, so every hierarchy change re-tests isShowing() rather than the
+		// listener depending on which flag each of those sets.
+		addHierarchyListener(e ->
+		{
+			if (rebuildPending && isShowing())
+			{
+				rebuild();
+			}
+		});
 	}
 
 	/** Sets the action run with a friend's world number when their row is double-clicked. */
@@ -325,10 +345,19 @@ class GroupListView extends JPanel
 	 */
 	void setFriends(Map<String, Integer> friends, int playerWorld)
 	{
-		final Map<String, Integer> worlds = new HashMap<>();
+		final Map<String, Integer> worlds = new HashMap<>(friends.size());
 		friends.forEach((name, world) -> worlds.put(GroupStore.key(name), world));
 
-		memberNames = new ArrayList<>(friends.keySet());
+		final List<String> names = new ArrayList<>(friends.keySet());
+
+		// The poll that feeds this re-sends the whole list whenever any part of it changes, so drop
+		// the updates that leave the rendered state identical.
+		if (this.playerWorld == playerWorld && names.equals(memberNames) && worlds.equals(worldByKey))
+		{
+			return;
+		}
+
+		memberNames = names;
 		worldByKey = worlds;
 		this.playerWorld = playerWorld;
 		rebuild();
@@ -337,6 +366,11 @@ class GroupListView extends JPanel
 	/** Sets the members for a list with no online status (the ignore list). */
 	void setNames(List<String> names)
 	{
+		if (names.equals(memberNames))
+		{
+			return;
+		}
+
 		memberNames = new ArrayList<>(names);
 		worldByKey = Collections.emptyMap();
 		playerWorld = 0;
@@ -345,6 +379,14 @@ class GroupListView extends JPanel
 
 	void rebuild()
 	{
+		// Nothing on screen to rebuild; the hierarchy listener replays this once when it is shown.
+		if (!isShowing())
+		{
+			rebuildPending = true;
+			return;
+		}
+
+		rebuildPending = false;
 		content.removeAll();
 
 		if (!loggedIn)
