@@ -7,5 +7,3 @@ build
 nbactions.xml
 nb-configuration.xml
 nbproject/
-src/main/resources/notes/
-gradle.properties
