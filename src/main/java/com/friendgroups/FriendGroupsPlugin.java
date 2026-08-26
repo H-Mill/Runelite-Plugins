@@ -44,7 +44,6 @@ import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.Friend;
 import net.runelite.api.FriendContainer;
@@ -56,7 +55,6 @@ import net.runelite.api.MenuEntry;
 import net.runelite.api.Nameable;
 import net.runelite.api.NameableContainer;
 import net.runelite.api.ScriptID;
-import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -72,10 +70,6 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetUtil;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.chat.ChatColorType;
-import net.runelite.client.chat.ChatMessageBuilder;
-import net.runelite.client.chat.ChatMessageManager;
-import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
@@ -83,7 +77,6 @@ import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.OverlayMenuClicked;
 import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.game.ChatIconManager;
-import net.runelite.client.game.WorldService;
 import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -96,10 +89,6 @@ import net.runelite.client.ui.overlay.OverlayMenuEntry;
 import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
-import net.runelite.client.util.WorldUtil;
-import net.runelite.http.api.worlds.World;
-import net.runelite.http.api.worlds.WorldResult;
-import net.runelite.http.api.worlds.WorldType;
 
 @Slf4j
 @PluginDescriptor(
@@ -130,9 +119,6 @@ public class FriendGroupsPlugin extends Plugin
 
 	/** Prefix the game puts before the world number in each online friend's row. */
 	private static final String WORLD_PREFIX = "World ";
-
-	/** How many ticks we try to open the world switcher before giving up on a quick-hop. */
-	private static final int DISPLAY_SWITCHER_MAX_ATTEMPTS = 3;
 
 	@Inject
 	private Client client;
@@ -176,12 +162,6 @@ public class FriendGroupsPlugin extends Plugin
 	private EventBus eventBus;
 
 	@Inject
-	private WorldService worldService;
-
-	@Inject
-	private ChatMessageManager chatMessageManager;
-
-	@Inject
 	@Named("friendList")
 	private ListReorderer friendReorderer;
 
@@ -207,7 +187,7 @@ public class FriendGroupsPlugin extends Plugin
 
 	private Map<String, Integer> friendWorlds = Collections.emptyMap();
 
-	/** Our own world last pushed to the panel, so a hop re-colors friends by same/other world. */
+	/** Our own world last pushed to the panel, so the panel colors friends by same/other world. */
 	private int playerWorld;
 
 	/** Normalized names of the current friends / ignores. Client thread only. */
@@ -226,11 +206,6 @@ public class FriendGroupsPlugin extends Plugin
 
 	/** Pixel width added by the grid icon on the row being laid out, so the x-shift matches the text. */
 	private int rowDotShift;
-
-	/** The world a panel double-click asked us to quick-hop to, pumped by {@link #onGameTick}; null when idle. */
-	private net.runelite.api.World quickHopTargetWorld;
-	/** Ticks spent trying to open the world switcher for the pending hop. */
-	private int displaySwitcherAttempts;
 
 	@Provides
 	FriendGroupsConfig provideConfig(ConfigManager configManager)
@@ -359,7 +334,6 @@ public class FriendGroupsPlugin extends Plugin
 		overlayManager.add(overlay);
 
 		panel.setOnOpenConfig(this::openConfiguration);
-		panel.setOnHop(this::hopTo);
 		showGroups(friendStore.isActive());
 
 		refreshInGame(GroupList.FRIENDS);
@@ -386,7 +360,6 @@ public class FriendGroupsPlugin extends Plugin
 		ignoreKeys = Collections.emptySet();
 		ignoreNames = Collections.emptyList();
 		playerWorld = 0;
-		resetQuickHopper();
 
 		// Redraw both lists without our decorations. ChatIconManager has no way to drop the dot
 		// icons we registered, so they are deliberately left behind for a later start.
@@ -676,7 +649,6 @@ public class FriendGroupsPlugin extends Plugin
 	{
 		pollFriends();
 		pollIgnores();
-		pumpQuickHop();
 	}
 
 	private void pollFriends()
@@ -1143,143 +1115,6 @@ public class FriendGroupsPlugin extends Plugin
 	{
 		log.debug("Rebuilding {} list", list.label);
 		client.runScript(list.rebuildScript());
-	}
-
-	/**
-	 * Quick-hops to {@code worldId}, invoked on the EDT when a friend's panel row is double-clicked.
-	 * The actual hop touches the client, so it is bounced onto the client thread.
-	 */
-	void hopTo(int worldId)
-	{
-		clientThread.invoke(() -> hop(worldId));
-	}
-
-	/**
-	 * Resolves the world and arms the quick-hopper (or changes world directly on the login screen).
-	 * Mirrors the World Hopper plugin: the switcher interface is then opened and driven from
-	 * {@link #pumpQuickHop} on the following ticks. Runs on the client thread.
-	 */
-	private void hop(int worldId)
-	{
-		assert client.isClientThread();
-
-		final WorldResult worldResult = worldService.getWorlds();
-		if (worldResult == null)
-		{
-			return;
-		}
-
-		final World world = worldResult.findWorld(worldId);
-		if (world == null)
-		{
-			return;
-		}
-
-		// Never hop into a PVP world from a non-PVP one - matches the World Hopper plugin's guard.
-		final World currentWorld = worldResult.findWorld(client.getWorld());
-		if (isPvpHopBlocked(currentWorld, world))
-		{
-			return;
-		}
-
-		final net.runelite.api.World rsWorld = client.createWorld();
-		rsWorld.setActivity(world.getActivity());
-		rsWorld.setAddress(world.getAddress());
-		rsWorld.setId(world.getId());
-		rsWorld.setPlayerCount(world.getPlayers());
-		rsWorld.setLocation(world.getLocation());
-		rsWorld.setTypes(WorldUtil.toWorldTypes(world.getTypes()));
-
-		if (client.getGameState() == GameState.LOGIN_SCREEN)
-		{
-			// On the login screen there is no switcher to drive - just change world directly.
-			client.changeWorld(rsWorld);
-			return;
-		}
-
-		final String chatMessage = new ChatMessageBuilder()
-			.append(ChatColorType.NORMAL)
-			.append("Quick-hopping to World ")
-			.append(ChatColorType.HIGHLIGHT)
-			.append(Integer.toString(world.getId()))
-			.append(ChatColorType.NORMAL)
-			.append("..")
-			.build();
-		chatMessageManager.queue(QueuedMessage.builder()
-			.type(ChatMessageType.CONSOLE)
-			.runeLiteFormattedMessage(chatMessage)
-			.build());
-
-		quickHopTargetWorld = rsWorld;
-		displaySwitcherAttempts = 0;
-	}
-
-	/**
-	 * Drives a pending quick-hop: opens the world switcher, then hops once it is up. Called each tick;
-	 * a no-op while no hop is pending. Mirrors the World Hopper plugin's tick handler.
-	 */
-	private void pumpQuickHop()
-	{
-		if (quickHopTargetWorld == null)
-		{
-			return;
-		}
-
-		if (client.getWidget(InterfaceID.Worldswitcher.BUTTONS) == null)
-		{
-			client.openWorldHopper();
-
-			if (++displaySwitcherAttempts >= DISPLAY_SWITCHER_MAX_ATTEMPTS)
-			{
-				final String chatMessage = new ChatMessageBuilder()
-					.append(ChatColorType.NORMAL)
-					.append("Failed to quick-hop after ")
-					.append(ChatColorType.HIGHLIGHT)
-					.append(Integer.toString(displaySwitcherAttempts))
-					.append(ChatColorType.NORMAL)
-					.append(" attempts.")
-					.build();
-				chatMessageManager.queue(QueuedMessage.builder()
-					.type(ChatMessageType.CONSOLE)
-					.runeLiteFormattedMessage(chatMessage)
-					.build());
-
-				resetQuickHopper();
-			}
-		}
-		else
-		{
-			client.hopToWorld(quickHopTargetWorld);
-			resetQuickHopper();
-		}
-	}
-
-	@Subscribe
-	public void onChatMessage(ChatMessage event)
-	{
-		if (event.getType() == ChatMessageType.GAMEMESSAGE
-			&& event.getMessage().equals("Please finish what you're doing before using the World Switcher."))
-		{
-			resetQuickHopper();
-		}
-	}
-
-	private void resetQuickHopper()
-	{
-		displaySwitcherAttempts = 0;
-		quickHopTargetWorld = null;
-	}
-
-	/**
-	 * The World Hopper plugin's safety guard, applied to a double-click hop: refuse to hop into a PVP
-	 * world from a non-PVP one, so a stray click cannot drop you into a PVP world unexpectedly. An
-	 * unknown current world (null) does not block the hop.
-	 */
-	static boolean isPvpHopBlocked(World currentWorld, World targetWorld)
-	{
-		return currentWorld != null
-			&& !currentWorld.getTypes().contains(WorldType.PVP)
-			&& targetWorld.getTypes().contains(WorldType.PVP);
 	}
 
 	/** The groups of the currently hovered in-game row, resolved from the right list. Read by the overlay. */

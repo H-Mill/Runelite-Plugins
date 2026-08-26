@@ -181,12 +181,6 @@ class FriendGroupsPanel extends PluginPanel
 		this.onOpenConfig = onOpenConfig;
 	}
 
-	/** Sets the action run with a friend's world number when their row is double-clicked. */
-	void setOnHop(java.util.function.IntConsumer onHop)
-	{
-		friendsView.setOnHop(onHop);
-	}
-
 	void setLoggedIn(boolean loggedIn)
 	{
 		friendsView.setLoggedIn(loggedIn);
