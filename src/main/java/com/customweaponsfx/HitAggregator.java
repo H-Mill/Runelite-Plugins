@@ -46,6 +46,8 @@ class HitAggregator
 			{
 				attack = new PendingAttack(h.groups, h.dontOverrideGlobal);
 				attack.wasSpec = h.wasSpec;
+				attack.tick = h.tick;
+				attack.key = h.key;
 				attacks.put(h.key, attack);
 			}
 			attack.amounts.add(h.amount);

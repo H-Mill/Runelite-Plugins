@@ -179,6 +179,8 @@ class WeaponManager
 
 			TriggerGroup copy = new TriggerGroup(triggers, sounds, g.getChance());
 			copy.setName(g.getName());
+			for (BlacklistEntry b : g.getBlacklist())
+				copy.addToBlacklist(b.getItemId(), b.getWeaponName());
 			out.add(copy);
 		}
 		return out;

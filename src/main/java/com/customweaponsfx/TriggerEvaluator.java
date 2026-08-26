@@ -38,6 +38,23 @@ final class TriggerEvaluator
 		boolean suppressMax, boolean suppressZero, boolean isKill,
 		Set<Triggers> weaponCoveredTriggers)
 	{
+		return selectFiringGroups(groups, wasSpec, anyHit, allZero, allMax,
+			suppressMax, suppressZero, isKill, weaponCoveredTriggers, EMPTY_AMOUNTS);
+	}
+
+	private static final int[] EMPTY_AMOUNTS = new int[0];
+
+	/**
+	 * As {@link #selectFiringGroups(List, boolean, boolean, boolean, boolean, boolean, boolean, boolean, Set)},
+	 * but additionally supplies each hitsplat's {@code amounts} so amount-based triggers (see
+	 * {@link Triggers#isAmount()}) can compare against their per-group {@link AmountCondition}.
+	 */
+	static List<TriggerGroup> selectFiringGroups(
+		List<TriggerGroup> groups, boolean wasSpec,
+		boolean anyHit, boolean allZero, boolean allMax,
+		boolean suppressMax, boolean suppressZero, boolean isKill,
+		Set<Triggers> weaponCoveredTriggers, int[] amounts)
+	{
 		// Pre-filter: when a non-empty suppression set is provided, skip groups whose triggers
 		// overlap with triggers the weapon already handles.
 		List<TriggerGroup> activeGroups = weaponCoveredTriggers.isEmpty() ? groups : groups.stream()
@@ -72,7 +89,7 @@ final class TriggerEvaluator
 				{
 					if (trigger == Triggers.KILL) continue;
 					hasOtherTriggers = true;
-					if (matchesTrigger(trigger, wasSpec, anyHit, allZero, allMax, suppressMax, suppressZero, isKill))
+					if (matchesGroupTrigger(group, trigger, wasSpec, anyHit, allZero, allMax, suppressMax, suppressZero, isKill, amounts))
 					{
 						anyOtherMatches = true;
 						break;
@@ -85,7 +102,7 @@ final class TriggerEvaluator
 				matches = false;
 				for (Triggers trigger : triggers)
 				{
-					if (matchesTrigger(trigger, wasSpec, anyHit, allZero, allMax, suppressMax, suppressZero, isKill))
+					if (matchesGroupTrigger(group, trigger, wasSpec, anyHit, allZero, allMax, suppressMax, suppressZero, isKill, amounts))
 					{
 						matches = true;
 						break;
@@ -96,6 +113,39 @@ final class TriggerEvaluator
 			firing.add(group);
 		}
 		return firing;
+	}
+
+	/**
+	 * Dispatches to {@link #matchesAmountTrigger} for amount-based triggers (which need the group's
+	 * {@link AmountCondition} and the raw damage), and to {@link #matchesTrigger} for the rest.
+	 */
+	static boolean matchesGroupTrigger(TriggerGroup group, Triggers trigger, boolean wasSpec,
+									   boolean anyHit, boolean allZero, boolean allMax,
+									   boolean suppressMax, boolean suppressZero, boolean isKill, int[] amounts)
+	{
+		if (trigger.isAmount())
+		{
+			return matchesAmountTrigger(trigger, group.getAmountCondition(trigger), wasSpec, amounts);
+		}
+		return matchesTrigger(trigger, wasSpec, anyHit, allZero, allMax, suppressMax, suppressZero, isKill);
+	}
+
+	/**
+	 * True when {@code trigger}'s attack type matches ({@link Triggers#isSpecial()} vs {@code wasSpec})
+	 * and the attack's <em>total</em> damage satisfies {@code condition}. All hitsplats from the attack
+	 * are summed first, so a multi-hit attack (e.g. a claws special) is compared as one number rather
+	 * than per hitsplat. A null condition, or an attack with no hitsplats, never matches.
+	 */
+	static boolean matchesAmountTrigger(Triggers trigger, AmountCondition condition, boolean wasSpec, int[] amounts)
+	{
+		if (condition == null || amounts == null || amounts.length == 0) return false;
+		if (trigger.isSpecial() != wasSpec) return false;
+		int total = 0;
+		for (int amount : amounts)
+		{
+			total += amount;
+		}
+		return condition.matches(total);
 	}
 
 	static boolean matchesTrigger(Triggers trigger, boolean wasSpec,

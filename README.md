@@ -6,10 +6,13 @@ Play custom sound effects when you attack or get hit in Old School RuneScape.
 
 - Assign sounds to specific weapons
 - Play different sounds for misses, regular hits, and max hits — on both regular and special attacks
+- **Amount triggers** — play a sound only when a hit deals more than, less than, or exactly the damage you choose, for regular and special attacks
+- Correct handling for multi-hit weapons like dragon claws, dark bow, and twinflame staff, so their attacks play one sound instead of several
 - Dedicated **Player kill** trigger that fires when your attack kills another player
 - Dedicated **Player death** trigger (Received Attacks) that fires when your character dies
 - Separate sounds for when *you* take damage (Received Attacks)
 - **Global (All Weapons)** fallback section — plays sounds for any weapon that doesn't have its own configuration for a given trigger
+- **Per-group blacklist** — exclude specific weapons from an individual Global sound group, so it plays for everything else
 - Multiple sound groups per weapon or section, each with its own triggers, sounds, volume, and activation chance
 - Multiple sounds per group — one is picked at random each time the group fires, with an adjustable **weight** to make some sounds more likely than others
 - Per-group activation chance (0–100%) for randomized playback
@@ -56,17 +59,35 @@ Multiple sound groups on the same weapon (or section) with matching triggers all
 
 ## Triggers
 
+Weapons and the **Global (All Weapons)** section offer these triggers:
+
 | Trigger | When it fires |
 |---|---|
 | Regular attack zero | Regular attack that deals 0 damage |
 | Regular attack max | Regular attack that is a max hit |
+| Regular attack amount | Regular attack that deals more than, less than, or exactly a chosen amount |
 | Special attack zero | Special attack that deals 0 damage |
 | Special attack hit | Special attack that deals non-max damage |
 | Special attack max | Special attack that is a max hit |
+| Special attack amount | Special attack that deals more than, less than, or exactly a chosen amount |
 | All attacks | Every attack, including zero-damage hits |
 | Player kill | Your attack kills another player |
 
-The **Received Attacks** section supports a subset: Regular attack zero, Regular attack hit, All attacks, and Player death.
+The **Received Attacks** section has its own set: Regular attack zero, **Regular attack hit** (any non-max damage you take), All attacks, and Player death.
+
+### Amount triggers
+
+**Regular attack amount** and **Special attack amount** play a sound based on how much damage a hit deals. When you enable one, pick an option — more than (`>`), less than (`<`), or exactly (`=`) — and type a number. For example, set `= 73` to play a sound on an exact 73, or `> 50` for any big hit.
+
+Regular attack amount reacts to your regular attacks; Special attack amount reacts to your special attacks. For weapons that hit more than once in a single attack, it's the combined damage of that attack that's checked.
+
+### Multi-hit weapons
+
+Some weapons hit several times in one attack, and those hits can land a little apart. The plugin treats these as a single attack so you get one sound for the whole thing instead of several. This applies to:
+
+- **Dragon claws** and **Burning claws** (special attack)
+- **Dark bow** (every attack)
+- **Twinflame staff** (every cast)
 
 ### Player kill trigger
 
@@ -103,6 +124,20 @@ If you would rather have both the weapon-specific and global sounds play for ove
 **Example:** configure a generic hit sound in Global with the *All attacks* trigger. Add your scythe with only a *Regular attack max* group. Scythe max hits play the scythe sound; every other hit type on the scythe, and all hits with any other weapon, play the global sound.
 
 The global section only fires for outgoing hits — it is not affected by incoming damage.
+
+### Blacklisting weapons from a Global group
+
+Each **Global (All Weapons)** sound group has its own **Blacklist** — a list of weapons that group will *not* play for. Use it when a global sound suits most of your weapons but you want a handful excluded, without having to give those weapons their own configuration.
+
+Expand a Global sound group to find its **Blacklist** row, then add weapons the same way you add them elsewhere:
+
+- **Search** (magnifying-glass icon) — find a weapon by name (requires being logged in).
+- **Add (Equipped)** (plus icon) — blacklist your currently equipped weapon.
+- **Delete** (trash icon) — remove a weapon from the list.
+
+When you attack with a blacklisted weapon, that group is skipped. **Only that one group is affected** — the weapon still plays its own weapon-specific sounds and any *other* Global groups it isn't blacklisted from. The blacklist is per group, so the same weapon can be excluded from one Global group while still playing another.
+
+**Example:** you have a Global *Special attack max* group with a generic max-hit sound. Add your Zaryte crossbow (ZCB) to that group's blacklist so its spec maxes stay silent (or play only their own weapon-specific sound), while every other weapon keeps playing the global spec-max sound.
 
 ## Enabling and Disabling Weapons and Sections
 
@@ -171,6 +206,15 @@ Click **Reset All Data** to clear all weapons and sound groups and restore defau
 **Splashing** - Your players splashing, like thrall zeros, cannot be distinguished from other players splashes, so I opted to not include them in the plugin (everyones splashes around you would cause a SFX).
 
 ## Version History
+
+### 2.13
+
+- Add a **per-group blacklist** to the **Global (All Weapons)** section — each Global sound group can now exclude specific weapons, so the group plays for every weapon *except* the ones you list. Expand a Global group to find its **Blacklist** row, then add weapons by name **Search** or **Add (Equipped)**, and remove them with the **delete** icon. Only the group you blacklist a weapon from is skipped — the weapon still plays its own sounds and any other Global groups. The blacklist is saved per group.
+
+### 2.12
+
+- Add **Regular attack amount** and **Special attack amount** triggers — play a sound only when a hit deals more than, less than, or exactly the damage you choose. Enable the trigger, pick `>`, `<`, or `=`, and type a number (e.g. `= 73` for an exact hit, or `> 50` for any big hit).
+- Add correct handling for multi-hit weapons whose hits can land a little apart — **dragon claws**, **burning claws**, **dark bow**, and **twinflame staff**. Their attacks now play one sound for the whole attack instead of several.
 
 ### 2.11
 

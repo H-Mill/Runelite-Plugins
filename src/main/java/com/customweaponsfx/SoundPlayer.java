@@ -50,10 +50,10 @@ class SoundPlayer
 	void fireMatchingGroups(List<TriggerGroup> groups, boolean wasSpec,
 							boolean anyHit, boolean allZero, boolean allMax,
 							boolean suppressMax, boolean suppressZero, boolean isKill,
-							Set<Triggers> weaponCoveredTriggers)
+							Set<Triggers> weaponCoveredTriggers, int[] amounts)
 	{
 		for (TriggerGroup group : TriggerEvaluator.selectFiringGroups(groups, wasSpec, anyHit, allZero,
-			allMax, suppressMax, suppressZero, isKill, weaponCoveredTriggers))
+			allMax, suppressMax, suppressZero, isKill, weaponCoveredTriggers, amounts))
 		{
 			fireGroup(group);
 		}

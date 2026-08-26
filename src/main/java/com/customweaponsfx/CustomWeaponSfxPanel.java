@@ -33,7 +33,9 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
@@ -191,6 +193,10 @@ public class CustomWeaponSfxPanel extends PluginPanel
 	private final Consumer<Integer> onCopyWeapon;
 	private final Consumer<Integer> onCopyWeaponEquipped;
 	private final BiConsumer<Integer, Integer> onReorderWeapon;
+	/** Opens the weapon search, handing the picked weapon's (id, name) back to the given blacklist-add sink. */
+	private final Consumer<BiConsumer<Integer, String>> onBlacklistSearch;
+	/** Resolves the equipped weapon, handing its (id, name) back to the given blacklist-add sink. */
+	private final Consumer<BiConsumer<Integer, String>> onBlacklistEquipped;
 	private final BiConsumer<String, Integer> onTestSound;
 	private final Consumer<TriggerGroup> onTestGroup;
 	private final Runnable onReset;
@@ -200,6 +206,8 @@ public class CustomWeaponSfxPanel extends PluginPanel
 	private final Consumer<String> onExcludedNpcIdsChanged;
 	private final Consumer<String> onExcludedNpcNamesChanged;
 	private final Consumer<String> onMutedWeaponSoundIdsChanged;
+	/** Dev-only: runs a ::cwsdamage-style args string against a weapon from its icon's right-click menu. Null outside developer mode. */
+	private final BiConsumer<Integer, String> onSimulateDebugDamage;
 
 	private JCheckBox ignoreSmallMaxCheckBox;
 	private JCheckBox ignoreZeroPrayerCheckBox;
@@ -220,6 +228,8 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		Consumer<Integer> onCopyWeapon,
 		Consumer<Integer> onCopyWeaponEquipped,
 		BiConsumer<Integer, Integer> onReorderWeapon,
+		Consumer<BiConsumer<Integer, String>> onBlacklistSearch,
+		Consumer<BiConsumer<Integer, String>> onBlacklistEquipped,
 		BiConsumer<String, Integer> onTestSound,
 		Consumer<TriggerGroup> onTestGroup,
 		Runnable onReset,
@@ -228,7 +238,8 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		BiConsumer<SfxOption, Boolean> onOptionToggled,
 		Consumer<String> onExcludedNpcIdsChanged,
 		Consumer<String> onExcludedNpcNamesChanged,
-		Consumer<String> onMutedWeaponSoundIdsChanged)
+		Consumer<String> onMutedWeaponSoundIdsChanged,
+		BiConsumer<Integer, String> onSimulateDebugDamage)
 	{
 		this.store = store;
 		this.itemManager = itemManager;
@@ -240,6 +251,8 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		this.onCopyWeapon = onCopyWeapon;
 		this.onCopyWeaponEquipped = onCopyWeaponEquipped;
 		this.onReorderWeapon = onReorderWeapon;
+		this.onBlacklistSearch = onBlacklistSearch;
+		this.onBlacklistEquipped = onBlacklistEquipped;
 		this.onTestSound = onTestSound;
 		this.onTestGroup = onTestGroup;
 		this.onReset = onReset;
@@ -249,6 +262,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		this.onExcludedNpcIdsChanged = onExcludedNpcIdsChanged;
 		this.onExcludedNpcNamesChanged = onExcludedNpcNamesChanged;
 		this.onMutedWeaponSoundIdsChanged = onMutedWeaponSoundIdsChanged;
+		this.onSimulateDebugDamage = onSimulateDebugDamage;
 
 		setLayout(new BorderLayout());
 		setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -578,7 +592,8 @@ public class CustomWeaponSfxPanel extends PluginPanel
 					+ "weapon you have equipped. Configure sound groups and triggers<br>"
 					+ "for incoming attacks here.</html>",
 				RECEIVED_GROUPS_PREFIX, receivedGroups, availableSounds,
-				EnumSet.of(Triggers.REGULAR_ZERO, Triggers.REGULAR_HIT, Triggers.ALL, Triggers.PLAYER_DEATH), SfxOption.RECEIVED_ENABLED));
+				EnumSet.of(Triggers.REGULAR_ZERO, Triggers.REGULAR_HIT, Triggers.ALL, Triggers.PLAYER_DEATH), SfxOption.RECEIVED_ENABLED,
+				false));
 			weaponListPanel.add(Box.createVerticalStrut(4));
 
 			weaponListPanel.add(buildDefaultRowGroups(
@@ -589,7 +604,8 @@ public class CustomWeaponSfxPanel extends PluginPanel
 					+ "they do not stack (unless that weapon's <b>Don't override Global</b><br>"
 					+ "toggle is enabled).</html>",
 				GLOBAL_WEAPON_GROUPS_PREFIX, globalWeaponGroups, availableSounds,
-				EnumSet.complementOf(EnumSet.of(Triggers.REGULAR_HIT, Triggers.PLAYER_DEATH)), SfxOption.GLOBAL_ENABLED));
+				EnumSet.complementOf(EnumSet.of(Triggers.REGULAR_HIT, Triggers.PLAYER_DEATH)), SfxOption.GLOBAL_ENABLED,
+				true));
 			weaponListPanel.add(Box.createVerticalStrut(4));
 
 
@@ -621,7 +637,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 
 	private JPanel buildDefaultRowGroups(String label, String tooltip, String prefix,
 		List<TriggerGroup> groups, List<String> availableSounds, Set<Triggers> visibleTriggers,
-		SfxOption enabledOption)
+		SfxOption enabledOption, boolean showBlacklist)
 	{
 		JLabel nameLabel = new JLabel(label);
 		nameLabel.setForeground(ColorScheme.BRAND_ORANGE);
@@ -645,7 +661,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 			null, null, nameLabel, eastControls, false, 0,
 			null,
 			groups, availableSounds,
-			() -> store.saveDefaultGroups(prefix, groups), visibleTriggers);
+			() -> store.saveDefaultGroups(prefix, groups), visibleTriggers, showBlacklist);
 	}
 
 	private static final Color ROW_COLOR_A = ColorScheme.DARKER_GRAY_COLOR;
@@ -668,6 +684,23 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		if (icon != null)
 		{
 			icon.addTo(iconLabel);
+		}
+
+		// Dev-only: right-click the weapon icon to simulate damage against this weapon.
+		if (onSimulateDebugDamage != null)
+		{
+			JPopupMenu menu = new JPopupMenu();
+			JMenuItem simulate = new JMenuItem("Simulate damage...");
+			simulate.addActionListener(e ->
+			{
+				String input = JOptionPane.showInputDialog(this,
+					"Simulated damage for " + entry.getWeaponName() + " (e.g. 15m+15m 7+5 s):",
+					"Simulate Damage", JOptionPane.PLAIN_MESSAGE);
+				if (input != null && !input.trim().isEmpty())
+					onSimulateDebugDamage.accept(entry.getItemId(), input.trim());
+			});
+			menu.add(simulate);
+			iconLabel.setComponentPopupMenu(menu);
 		}
 
 		JLabel nameLabel = new JLabel(entry.getWeaponName());
@@ -742,7 +775,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 			dontOverrideGlobalBox,
 			entry.getGroups(), availableSounds,
 			() -> store.saveWeaponGroups(entry),
-			EnumSet.complementOf(EnumSet.of(Triggers.REGULAR_HIT, Triggers.PLAYER_DEATH)));
+			EnumSet.complementOf(EnumSet.of(Triggers.REGULAR_HIT, Triggers.PLAYER_DEATH)), false);
 
 		// Only the drag handle starts a reorder: an otherwise-empty listener on the row consumes presses on
 		// its dead areas so they don't bubble to the reorder pane and begin a whole-row drag.
@@ -814,7 +847,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		int headerMaxHeight,
 		Component bodyLeading,
 		List<TriggerGroup> groups, List<String> availableSounds,
-		Runnable onSave, Set<Triggers> visibleTriggers)
+		Runnable onSave, Set<Triggers> visibleTriggers, boolean showBlacklist)
 	{
 		boolean collapsed = !expandedSet.contains(key);
 
@@ -905,7 +938,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 
 		JPanel groupsHolder = boxColumn(bg);
 		groupsHolder.setVisible(!collapsed);
-		rebuildGroupsSection(groupsHolder, groups, availableSounds, onSave, visibleTriggers);
+		rebuildGroupsSection(groupsHolder, groups, availableSounds, onSave, visibleTriggers, showBlacklist);
 		panel.add(groupsHolder);
 
 		collapseBtn.addActionListener(e ->
@@ -927,7 +960,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 	}
 
 	private void rebuildGroupsSection(JPanel holder, List<TriggerGroup> groups,
-		List<String> availableSounds, Runnable onSave, Set<Triggers> visibleTriggers)
+		List<String> availableSounds, Runnable onSave, Set<Triggers> visibleTriggers, boolean showBlacklist)
 	{
 		holder.removeAll();
 
@@ -986,7 +1019,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 				}
 				group.setName(trimmed);
 				onSave.run();
-				rebuildGroupsSection(holder, groups, availableSounds, onSave, visibleTriggers);
+				rebuildGroupsSection(holder, groups, availableSounds, onSave, visibleTriggers, showBlacklist);
 			});
 			headerButtons.add(renameGroupBtn);
 
@@ -996,7 +1029,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 				if (!confirmYesNo("Remove \"" + groupName + "\"?", "Remove Sound Group")) return;
 				groups.remove(idx);
 				onSave.run();
-				rebuildGroupsSection(holder, groups, availableSounds, onSave, visibleTriggers);
+				rebuildGroupsSection(holder, groups, availableSounds, onSave, visibleTriggers, showBlacklist);
 			});
 			headerButtons.add(removeGroupBtn);
 
@@ -1013,7 +1046,15 @@ public class CustomWeaponSfxPanel extends PluginPanel
 			groupPanel.add(Box.createVerticalStrut(4));
 			groupPanel.add(soundsHolder);
 			groupPanel.add(Box.createVerticalStrut(4));
-			groupPanel.add(buildTriggersPanel(group.getTriggers(), onSave, visibleTriggers));
+			groupPanel.add(buildTriggersPanel(group, onSave, visibleTriggers));
+
+			if (showBlacklist)
+			{
+				groupPanel.add(Box.createVerticalStrut(4));
+				groupPanel.add(buildGroupBlacklistPanel(group,
+					() -> rebuildGroupsSection(holder, groups, availableSounds, onSave, visibleTriggers, true),
+					onSave));
+			}
 
 			holder.add(groupPanel);
 			if (i < groups.size() - 1)
@@ -1032,7 +1073,7 @@ public class CustomWeaponSfxPanel extends PluginPanel
 			newGroup.setName(TriggerGroup.defaultName(groups));
 			groups.add(newGroup);
 			onSave.run();
-			rebuildGroupsSection(holder, groups, availableSounds, onSave, visibleTriggers);
+			rebuildGroupsSection(holder, groups, availableSounds, onSave, visibleTriggers, showBlacklist);
 		});
 		holder.add(addGroupBtn);
 
@@ -1040,8 +1081,118 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		holder.repaint();
 	}
 
-	private JPanel buildTriggersPanel(Set<Triggers> enabledTriggers, Runnable onSave, Set<Triggers> visibleTriggers)
+	/**
+	 * A group's blacklist sub-section: a header with search / add-equipped buttons and one row per
+	 * blacklisted weapon (icon, name, delete). Shown only for Global (All Weapons) groups — the group
+	 * is suppressed for the weapons listed here. {@code rebuildSection} re-renders the enclosing groups
+	 * list after an add/remove so the new rows appear.
+	 */
+	private JPanel buildGroupBlacklistPanel(TriggerGroup group, Runnable rebuildSection, Runnable onSave)
 	{
+		JPanel panel = boxColumn(ColorScheme.DARK_GRAY_COLOR);
+		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JPanel headerRow = new JPanel();
+		headerRow.setLayout(new BoxLayout(headerRow, BoxLayout.X_AXIS));
+		headerRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JLabel lbl = new JLabel("Blacklist:");
+		lbl.setForeground(Color.WHITE);
+		lbl.setToolTipText("<html>Weapons listed here do <b>not</b> play this Global sound group.<br>"
+			+ "Their own weapon-specific sounds and other Global groups are unaffected.</html>");
+		headerRow.add(lbl);
+
+		headerRow.add(Box.createHorizontalGlue());
+
+		// The sink mutates the group on the EDT (matching the other panel edits) then re-renders the list.
+		BiConsumer<Integer, String> addSink = (itemId, name) -> SwingUtilities.invokeLater(() ->
+		{
+			if (group.addToBlacklist(itemId, name))
+			{
+				onSave.run();
+				rebuildSection.run();
+			}
+		});
+
+		JButton addSearchBtn = makeImageButton(ADD_SEARCH_ICON, ADD_SEARCH_HOVER_ICON,
+			"Search for a weapon to exclude from this Global sound group");
+		addSearchBtn.addActionListener(e -> onBlacklistSearch.accept(addSink));
+		registerLoginButton(addSearchBtn, weaponLoginButtons);
+		headerRow.add(addSearchBtn);
+
+		headerRow.add(Box.createHorizontalStrut(4));
+
+		JButton addEquippedBtn = makeImageButton(ADD_PLUS_ICON, ADD_PLUS_HOVER_ICON,
+			"Exclude your currently equipped weapon from this Global sound group");
+		addEquippedBtn.addActionListener(e -> onBlacklistEquipped.accept(addSink));
+		registerEquippedWeaponButton(addEquippedBtn);
+		headerRow.add(addEquippedBtn);
+
+		headerRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, headerRow.getPreferredSize().height));
+		panel.add(headerRow);
+
+		List<BlacklistEntry> blacklist = group.getBlacklist();
+		if (blacklist.isEmpty())
+		{
+			JLabel emptyLabel = new JLabel("No weapons blacklisted.");
+			emptyLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			emptyLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+			emptyLabel.setBorder(new EmptyBorder(2, 0, 0, 0));
+			panel.add(emptyLabel);
+		}
+		else
+		{
+			for (BlacklistEntry entry : blacklist)
+			{
+				panel.add(Box.createVerticalStrut(4));
+				panel.add(buildGroupBlacklistRow(group, entry, rebuildSection, onSave));
+			}
+		}
+
+		return panel;
+	}
+
+	/** One blacklisted-weapon row within a group: its icon, name, and a delete button on the right edge. */
+	private JPanel buildGroupBlacklistRow(TriggerGroup group, BlacklistEntry entry,
+		Runnable rebuildSection, Runnable onSave)
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JLabel iconLabel = new JLabel();
+		iconLabel.setPreferredSize(new Dimension(24, 24));
+		iconLabel.setToolTipText(entry.getWeaponName());
+		AsyncBufferedImage icon = itemManager.getImage(entry.getItemId());
+		if (icon != null)
+		{
+			icon.addTo(iconLabel);
+		}
+		row.add(iconLabel, BorderLayout.WEST);
+
+		JLabel nameLabel = new JLabel(entry.getWeaponName());
+		nameLabel.setForeground(Color.WHITE);
+		nameLabel.setToolTipText(entry.getWeaponName());
+		row.add(nameLabel, BorderLayout.CENTER);
+
+		JButton removeBtn = makeRemoveButton("Remove from blacklist");
+		removeBtn.addActionListener(e ->
+		{
+			group.removeFromBlacklist(entry.getItemId());
+			onSave.run();
+			rebuildSection.run();
+		});
+		row.add(removeBtn, BorderLayout.EAST);
+
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+		return row;
+	}
+
+	private JPanel buildTriggersPanel(TriggerGroup group, Runnable onSave, Set<Triggers> visibleTriggers)
+	{
+		Set<Triggers> enabledTriggers = group.getTriggers();
+
 		JPanel panel = boxColumn(ColorScheme.DARK_GRAY_COLOR);
 
 		JLabel lbl = new JLabel("Triggers:");
@@ -1054,6 +1205,12 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		for (Triggers trigger : Triggers.values())
 		{
 			if (!visibleTriggers.contains(trigger)) continue;
+			// Amount triggers carry an operator + value, so they get their own row with extra controls.
+			if (trigger.isAmount())
+			{
+				panel.add(buildAmountTriggerRow(trigger, group, onSave));
+				continue;
+			}
 			JCheckBox box = new JCheckBox(trigger.getName());
 			box.setForeground(Color.LIGHT_GRAY);
 			box.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -1072,6 +1229,86 @@ public class CustomWeaponSfxPanel extends PluginPanel
 		return panel;
 	}
 
+	/**
+	 * A trigger row for an amount-based trigger: the enabling checkbox plus a comparison operator
+	 * ({@code >}, {@code <}, {@code =}) and a value. The operator/value controls are enabled only while
+	 * the trigger is checked, and every change is written back to the group's {@link AmountCondition}.
+	 */
+	private JPanel buildAmountTriggerRow(Triggers trigger, TriggerGroup group, Runnable onSave)
+	{
+		Set<Triggers> enabledTriggers = group.getTriggers();
+
+		// Column: the checkbox, then the operator + value controls on their own row beneath it. The
+		// side panel is narrow, so keeping the controls underneath avoids them overflowing off the edge.
+		JPanel column = boxColumn(ColorScheme.DARK_GRAY_COLOR);
+		column.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JCheckBox box = new JCheckBox(trigger.getName());
+		box.setForeground(Color.LIGHT_GRAY);
+		box.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		box.setToolTipText(triggerTooltip(trigger));
+		box.setSelected(enabledTriggers.contains(trigger));
+		box.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JComboBox<AmountCondition.Op> opCombo = new JComboBox<>(AmountCondition.Op.values());
+		opCombo.setToolTipText("How to compare the attack's total damage against the value");
+		opCombo.setMaximumSize(new Dimension(56, opCombo.getPreferredSize().height));
+
+		JSpinner valueSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 32767, 1));
+		valueSpinner.setToolTipText("The total damage value to compare against");
+		valueSpinner.setMaximumSize(new Dimension(72, valueSpinner.getPreferredSize().height));
+
+		// The controls sit on an indented row that is only shown while the trigger is checked.
+		JPanel controls = new JPanel();
+		controls.setLayout(new BoxLayout(controls, BoxLayout.X_AXIS));
+		controls.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		controls.setAlignmentX(Component.LEFT_ALIGNMENT);
+		controls.add(Box.createHorizontalStrut(20));
+		controls.add(opCombo);
+		controls.add(Box.createHorizontalStrut(4));
+		controls.add(valueSpinner);
+		controls.add(Box.createHorizontalGlue());
+		controls.setVisible(box.isSelected());
+		controls.setMaximumSize(new Dimension(Integer.MAX_VALUE, controls.getPreferredSize().height));
+
+		// Seed the controls from any saved condition (before wiring listeners, so seeding doesn't save).
+		AmountCondition existing = group.getAmountCondition(trigger);
+		opCombo.setSelectedItem(existing != null ? existing.getOp() : AmountCondition.Op.EQUAL);
+		valueSpinner.setValue(existing != null ? existing.getValue() : 0);
+
+		Runnable saveCondition = () -> group.setAmountCondition(trigger,
+			new AmountCondition((AmountCondition.Op) opCombo.getSelectedItem(), (Integer) valueSpinner.getValue()));
+
+		box.addActionListener(e ->
+		{
+			if (box.isSelected())
+			{
+				enabledTriggers.add(trigger);
+				saveCondition.run(); // ensure a condition exists when the trigger is first enabled
+			}
+			else
+			{
+				enabledTriggers.remove(trigger);
+			}
+			controls.setVisible(box.isSelected());
+			column.revalidate();
+			column.repaint();
+			onSave.run();
+		});
+		opCombo.addActionListener(e ->
+		{
+			if (box.isSelected()) { saveCondition.run(); onSave.run(); }
+		});
+		valueSpinner.addChangeListener(e ->
+		{
+			if (box.isSelected()) { saveCondition.run(); onSave.run(); }
+		});
+
+		column.add(box);
+		column.add(controls);
+		return column;
+	}
+
 	/** A short description of when each trigger fires, shown as the trigger checkbox's tooltip. */
 	private static String triggerTooltip(Triggers trigger)
 	{
@@ -1083,12 +1320,16 @@ public class CustomWeaponSfxPanel extends PluginPanel
 				return "Fires when a regular (non-special) attack deals 1 or more damage";
 			case REGULAR_MAX:
 				return "Fires when a regular (non-special) attack deals your maximum possible hit";
+			case REGULAR_AMOUNT:
+				return "Fires when a regular (non-special) attack's total damage (all hitsplats summed) matches the chosen comparison (e.g. = 73)";
 			case SPECIAL_ZERO:
 				return "Fires when a special attack deals 0 damage";
 			case SPECIAL_HIT:
-				return "Fires when a special attack deals 1 or more damage";
+				return "Fires when a special attack deals 1 or more damage, but not a max hit";
 			case SPECIAL_MAX:
 				return "Fires when a special attack deals your maximum possible hit";
+			case SPECIAL_AMOUNT:
+				return "Fires when a special attack's total damage (all hitsplats summed) matches the chosen comparison (e.g. = 73)";
 			case ALL:
 				return "Fires on every attack, regardless of the outcome";
 			case KILL:

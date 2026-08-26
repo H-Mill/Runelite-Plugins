@@ -336,6 +336,8 @@ class CustomWeaponSfxConfigStore
 		}
 
 		TriggerGroup group = new TriggerGroup(triggers, sounds, chance);
+		group.getAmountConditions().putAll(TriggerGroup.deserializeAmountConditions(backend.get(gk + "_amounts")));
+		group.getBlacklist().addAll(TriggerGroup.deserializeBlacklist(backend.get(gk + "_blacklist")));
 		// Pre-name configs (and any with a blank name) fall back to the positional default.
 		String name = backend.get(gk + "_name");
 		group.setName(name != null && !name.isBlank() ? name : "Sound Group " + (index + 1));
@@ -354,6 +356,8 @@ class CustomWeaponSfxConfigStore
 		if (g.getName() != null) backend.set(gk + "_name", g.getName());
 		else backend.unset(gk + "_name");
 		backend.set(gk + "_triggers", TriggerGroup.serializeTriggers(g.getTriggers()));
+		backend.set(gk + "_amounts", TriggerGroup.serializeAmountConditions(g.getAmountConditions()));
+		backend.set(gk + "_blacklist", TriggerGroup.serializeBlacklist(g.getBlacklist()));
 		backend.set(gk + "_chance", g.getChance());
 		List<SoundEntry> sounds = g.getSounds();
 		backend.set(gk + "_soundCount", sounds.size());
@@ -376,6 +380,8 @@ class CustomWeaponSfxConfigStore
 	{
 		backend.unset(gk + "_name");
 		backend.unset(gk + "_triggers");
+		backend.unset(gk + "_amounts");
+		backend.unset(gk + "_blacklist");
 		backend.unset(gk + "_chance");
 		backend.unset(gk + "_soundCount");
 		for (int j = 0; j < sounds.size(); j++)

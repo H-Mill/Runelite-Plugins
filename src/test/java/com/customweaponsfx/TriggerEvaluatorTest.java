@@ -32,6 +32,15 @@ public class TriggerEvaluatorTest
 			allMax, suppressMax, suppressZero, isKill, covered);
 	}
 
+	private static List<TriggerGroup> fire(
+		List<TriggerGroup> groups, boolean wasSpec, boolean anyHit, boolean allZero,
+		boolean allMax, boolean suppressMax, boolean suppressZero, boolean isKill,
+		Set<Triggers> covered, int[] amounts)
+	{
+		return TriggerEvaluator.selectFiringGroups(groups, wasSpec, anyHit, allZero,
+			allMax, suppressMax, suppressZero, isKill, covered, amounts);
+	}
+
 	// ---- matchesTrigger truth table ------------------------------------------------
 
 	@Test
@@ -71,6 +80,8 @@ public class TriggerEvaluatorTest
 	{
 		assertTrue(TriggerEvaluator.matchesTrigger(Triggers.SPECIAL_HIT, true, true, false, false, false, false, false));
 		assertFalse(TriggerEvaluator.matchesTrigger(Triggers.SPECIAL_HIT, false, true, false, false, false, false, false));
+		// all max -> SPECIAL_HIT must NOT fire (SPECIAL_MAX owns that case)
+		assertFalse(TriggerEvaluator.matchesTrigger(Triggers.SPECIAL_HIT, true, true, false, true, false, false, false));
 		assertTrue(TriggerEvaluator.matchesTrigger(Triggers.SPECIAL_ZERO, true, false, true, false, false, false, false));
 		// SPECIAL_ZERO ignores suppressZero (only REGULAR_ZERO is gated by it)
 		assertTrue(TriggerEvaluator.matchesTrigger(Triggers.SPECIAL_ZERO, true, false, true, false, false, true, false));
@@ -198,6 +209,100 @@ public class TriggerEvaluatorTest
 		Set<Triggers> covered = EnumSet.of(Triggers.REGULAR_HIT);
 		List<TriggerGroup> result = fire(Collections.singletonList(all), false, true, false, false, false, false, false, covered);
 		assertEquals(Collections.singletonList(all), result);
+	}
+
+	// ---- amount triggers -----------------------------------------------------------
+
+	@Test
+	public void matchesAmountTriggerComparesSummedHitsplatsAgainstCondition()
+	{
+		AmountCondition eq73 = new AmountCondition(AmountCondition.Op.EQUAL, 73);
+		// a multi-hit regular attack whose hitsplats sum to 73 matches
+		assertTrue(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, eq73, false, new int[]{70, 3}));
+		// an individual hitsplat of 73 but a total of 83 does NOT match (accumulated, not per-splat)
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, eq73, false, new int[]{10, 73}));
+		// total short of 73 -> no match
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, eq73, false, new int[]{10, 20}));
+		// spec attack -> REGULAR_AMOUNT (a non-special trigger) must not fire
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, eq73, true, new int[]{73}));
+		// no condition, or no hitsplats -> never fires
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, null, false, new int[]{73}));
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, eq73, false, new int[0]));
+	}
+
+	@Test
+	public void amountTriggerAccumulatesMultipleHitsplats()
+	{
+		// A GREATER:40 condition fires when four splats (18+12+9+6 = 45) exceed 40, even though no single
+		// splat does.
+		AmountCondition gt40 = new AmountCondition(AmountCondition.Op.GREATER, 40);
+		assertTrue(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, gt40, false, new int[]{18, 12, 9, 6}));
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.REGULAR_AMOUNT, gt40, false, new int[]{18, 12, 9}));
+	}
+
+	@Test
+	public void specialAmountTriggerRequiresSpecAttack()
+	{
+		AmountCondition eq50 = new AmountCondition(AmountCondition.Op.EQUAL, 50);
+		// a spec attack landing a 50 matches SPECIAL_AMOUNT
+		assertTrue(TriggerEvaluator.matchesAmountTrigger(Triggers.SPECIAL_AMOUNT, eq50, true, new int[]{50}));
+		// same damage on a regular attack must not fire SPECIAL_AMOUNT
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.SPECIAL_AMOUNT, eq50, false, new int[]{50}));
+		// spec attack but wrong damage -> no match
+		assertFalse(TriggerEvaluator.matchesAmountTrigger(Triggers.SPECIAL_AMOUNT, eq50, true, new int[]{49}));
+	}
+
+	@Test
+	public void specialAmountGroupFiresOnlyOnMatchingSpecAttack()
+	{
+		TriggerGroup amount = group(Triggers.SPECIAL_AMOUNT);
+		amount.setAmountCondition(Triggers.SPECIAL_AMOUNT, new AmountCondition(AmountCondition.Op.GREATER, 40));
+
+		// spec attack totalling 45 -> fires
+		List<TriggerGroup> onSpec = fire(Collections.singletonList(amount), true, true, false, false, false, false, false, NO_COVER, new int[]{45});
+		assertEquals(Collections.singletonList(amount), onSpec);
+
+		// same total on a regular attack -> does not fire
+		List<TriggerGroup> onRegular = fire(Collections.singletonList(amount), false, true, false, false, false, false, false, NO_COVER, new int[]{45});
+		assertTrue(onRegular.isEmpty());
+	}
+
+	@Test
+	public void amountTriggerGroupFiresOnlyWhenDamageMatches()
+	{
+		TriggerGroup amount = group(Triggers.REGULAR_AMOUNT);
+		amount.setAmountCondition(Triggers.REGULAR_AMOUNT, new AmountCondition(AmountCondition.Op.EQUAL, 73));
+
+		// total of 73 on a regular attack -> fires
+		List<TriggerGroup> onMatch = fire(Collections.singletonList(amount), false, true, false, false, false, false, false, NO_COVER, new int[]{73});
+		assertEquals(Collections.singletonList(amount), onMatch);
+
+		// total of 50 -> does not fire
+		List<TriggerGroup> noMatch = fire(Collections.singletonList(amount), false, true, false, false, false, false, false, NO_COVER, new int[]{50});
+		assertTrue(noMatch.isEmpty());
+	}
+
+	@Test
+	public void amountTriggerGroupHonoursWeaponCoveredTriggers()
+	{
+		TriggerGroup amount = group(Triggers.REGULAR_AMOUNT);
+		amount.setAmountCondition(Triggers.REGULAR_AMOUNT, new AmountCondition(AmountCondition.Op.EQUAL, 73));
+		Set<Triggers> covered = EnumSet.of(Triggers.REGULAR_AMOUNT);
+		// the weapon already handles REGULAR_AMOUNT, so an overlapping global group is skipped
+		assertTrue(fire(Collections.singletonList(amount), false, true, false, false, false, false, false, covered, new int[]{73}).isEmpty());
+	}
+
+	@Test
+	public void amountTriggerWithKillActsAsAndGate()
+	{
+		TriggerGroup killAmount = group(Triggers.KILL, Triggers.SPECIAL_AMOUNT);
+		killAmount.setAmountCondition(Triggers.SPECIAL_AMOUNT, new AmountCondition(AmountCondition.Op.GREATER, 40));
+
+		// spec total over 40 but no kill -> KILL gate blocks it
+		assertTrue(fire(Collections.singletonList(killAmount), true, true, false, false, false, false, false, NO_COVER, new int[]{45}).isEmpty());
+		// same, but on a kill -> fires
+		assertEquals(Collections.singletonList(killAmount),
+			fire(Collections.singletonList(killAmount), true, true, false, false, false, false, true, NO_COVER, new int[]{45}));
 	}
 
 	@Test

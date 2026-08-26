@@ -3,17 +3,22 @@ package com.customweaponsfx;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.GameState;
@@ -79,6 +84,7 @@ public class CustomWeaponSfxPlugin extends Plugin
 	@Inject private ItemManager itemManager;
 	@Inject private WeaponChatboxSearch weaponSearch;
 	@Inject private CustomWeaponSfxConfig config;
+	@Inject @Named("developerMode") private boolean developerMode;
 
 	private CustomWeaponSfxPanel panel;
 	private NavigationButton navButton;
@@ -111,6 +117,44 @@ public class CustomWeaponSfxPlugin extends Plugin
 	// Attributes delayed magic/ranged hits to the weapon that launched the projectile, so a weapon
 	// swap (or auto-retaliate melee swing) while the projectile is in flight can't steal the sound.
 	private final ProjectileWeaponTracker projectiles = new ProjectileWeaponTracker();
+
+	// Aggregates the hitsplats of a multi-hit attack (e.g. claws' spec over 2 ticks, or the dark bow's two
+	// arrows) into one attack, per the weapon's AttackProfile, so triggers see the combined max/hit/total
+	// instead of each tick's partial. Fired once the attack's hits complete (see onGameTick).
+	private final AttackAggregator attackSpread = new AttackAggregator();
+
+	// Debug: ticks queued by the ::cwsdamage command, one injected per game tick so the normal
+	// aggregation/trigger/sound pipeline is exercised.
+	private final Deque<DebugTick> debugDamageQueue = new ArrayDeque<>();
+
+	/** One tick's simultaneous simulated hitsplats for the {@code ::cwsdamage} debug command. */
+	private static final class DebugTick
+	{
+		/** Weapon item id to attribute the hits to, or -1 to use whatever's currently equipped. */
+		final int weaponId;
+		final List<DebugHit> hits;
+
+		DebugTick(int weaponId, List<DebugHit> hits)
+		{
+			this.weaponId = weaponId;
+			this.hits     = hits;
+		}
+	}
+
+	/** One queued simulated hitsplat for the {@code ::cwsdamage} debug command. */
+	private static final class DebugHit
+	{
+		final int amount;
+		final boolean isMax;
+		final boolean wasSpec;
+
+		DebugHit(int amount, boolean isMax, boolean wasSpec)
+		{
+			this.amount  = amount;
+			this.isMax   = isMax;
+			this.wasSpec = wasSpec;
+		}
+	}
 
 	@Provides
 	CustomWeaponSfxConfig provideConfig(ConfigManager configManager)
@@ -164,6 +208,12 @@ public class CustomWeaponSfxPlugin extends Plugin
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
+		// Drop any in-progress multi-hit attack on leaving the world so it can't fire a stale sound on relogin.
+		if (event.getGameState() != GameState.LOGGED_IN)
+		{
+			attackSpread.reset();
+			debugDamageQueue.clear();
+		}
 		updateLoginButtons();
 	}
 
@@ -214,7 +264,7 @@ public class CustomWeaponSfxPlugin extends Plugin
 		npcFilter.load();
 		soundMute.load();
 
-		panel = new CustomWeaponSfxPanel(store, itemManager, this::openWeaponSearch, this::addEquippedWeapon, weapons::remove, this::editWeaponViaSearch, this::editWeaponToEquipped, this::copyWeapon, this::copyWeaponToEquipped, weapons::move, soundPlayer::playSoundFile, soundPlayer::fireGroup, this::resetAllData, this::refreshSounds, this::openConfiguration, this::onOptionChanged, npcFilter::setIds, npcFilter::setNames, soundMute::setIds);
+		panel = new CustomWeaponSfxPanel(store, itemManager, this::openWeaponSearch, this::addEquippedWeapon, weapons::remove, this::editWeaponViaSearch, this::editWeaponToEquipped, this::copyWeapon, this::copyWeaponToEquipped, weapons::move, this::pickWeaponForBlacklist, this::pickEquippedForBlacklist, soundPlayer::playSoundFile, soundPlayer::fireGroup, this::resetAllData, this::refreshSounds, this::openConfiguration, this::onOptionChanged, npcFilter::setIds, npcFilter::setNames, soundMute::setIds, developerMode ? this::runDebugDamage : null);
 
 		rebuildNavButton();
 
@@ -262,6 +312,8 @@ public class CustomWeaponSfxPlugin extends Plugin
 
 		attackWeapon.reset();
 		projectiles.reset();
+		attackSpread.reset();
+		debugDamageQueue.clear();
 
 		log.debug("Custom Weapon SFX stopped!");
 	}
@@ -282,11 +334,24 @@ public class CustomWeaponSfxPlugin extends Plugin
 
 		projectiles.prune(client.getTickCount());
 
+		if (!debugDamageQueue.isEmpty())
+		{
+			injectDebugHits(debugDamageQueue.poll());
+		}
+
 		if (!hits.isEmpty())
 		{
 			for (List<PendingAttack> tickAttacks : hits.drainByTick())
 				evaluatePendingAttacks(tickAttacks);
 		}
+
+		// Fire an aggregated multi-hit attack once all its hitsplats have landed (see AttackAggregator).
+		if (attackSpread.isComplete(client.getTickCount()))
+		{
+			fireAttack(attackSpread.getWeaponId(), attackSpread.getGroups(), attackSpread.isDontOverrideGlobal(), attackSpread.buildOutcome());
+			attackSpread.reset();
+		}
+
 		suppressReceivedOnDeath = false;
 	}
 
@@ -434,6 +499,132 @@ public class CustomWeaponSfxPlugin extends Plugin
 		return ticks + 4;
 	}
 
+	/**
+	 * Parses {@code ::cwsdamage}-style tick tokens ({@code args[startIndex..]}) and queues them against
+	 * {@code weaponId} (-1 = the debug weapon, else equipped, resolved at inject time). Drives the panel's
+	 * dev-only "Simulate damage" menu.
+	 *
+	 * <p>Each token is one tick. Join hitsplats with {@code +} to land several on the same tick ({@code 8+7}),
+	 * or use {@code -} for an empty tick to space an attack out ({@code 30 - 30}). Append {@code m} for a max
+	 * hit and/or {@code s} for a special attack; a standalone {@code m}/{@code s} token applies to every hit.
+	 */
+	private void enqueueDebugDamage(int weaponId, String[] args, int startIndex)
+	{
+		// A standalone flag-only argument (e.g. a trailing "s") applies to every hit in the command,
+		// so `9+19 4+5 s` flags the whole attack as a spec rather than treating "s" as a tick.
+		boolean forceMax = false;
+		boolean forceSpec = false;
+		for (int i = startIndex; i < args.length; i++)
+		{
+			if (isFlagsOnly(args[i]))
+			{
+				String f = args[i].toLowerCase();
+				forceMax  |= f.indexOf('m') >= 0;
+				forceSpec |= f.indexOf('s') >= 0;
+			}
+		}
+
+		Deque<DebugTick> parsed = new ArrayDeque<>();
+		int hitCount = 0;
+		for (int i = startIndex; i < args.length; i++)
+		{
+			if (args[i].isEmpty() || isFlagsOnly(args[i])) continue; // command-wide flags (or empty tokens) aren't ticks
+
+			// A lone "-" is an empty tick: it advances a game tick without landing any hitsplat, so an
+			// attack whose hits are spread apart (e.g. a dark bow firing on tick 1 and tick 3) can be modelled.
+			if ("-".equals(args[i]))
+			{
+				parsed.add(new DebugTick(weaponId, java.util.Collections.emptyList()));
+				continue;
+			}
+
+			List<DebugHit> tickHits = new ArrayList<>();
+			for (String token : args[i].split("\\+"))
+			{
+				DebugHit hit = parseDebugHit(token, forceMax, forceSpec);
+				if (hit == null)
+				{
+					debugMessage("Invalid value: '" + token + "'. Use whole numbers or - to skip a tick, e.g. 30 - 30");
+					return;
+				}
+				tickHits.add(hit);
+			}
+			parsed.add(new DebugTick(weaponId, tickHits));
+			hitCount += tickHits.size();
+		}
+
+		if (hitCount == 0)
+		{
+			debugMessage("No damage given. e.g. 15 15");
+			return;
+		}
+
+		debugDamageQueue.addAll(parsed);
+		String on = weaponId >= 0 ? ("item " + weaponId) : "the equipped weapon";
+		debugMessage("Simulating " + hitCount + " hitsplat(s) over " + parsed.size() + " tick(s) on " + on + ".");
+	}
+
+	/**
+	 * Dev-only: runs a {@code ::cwsdamage}-style args string (e.g. {@code 15m+15m 7+5 s}) against {@code weaponId}
+	 * (the right-clicked weapon), from the panel's "Simulate damage" dialog. Hops to the client thread since the
+	 * menu fires on the Swing EDT.
+	 */
+	private void runDebugDamage(int weaponId, String input)
+	{
+		clientThread.invoke(() -> enqueueDebugDamage(weaponId, input.trim().split("\\s+"), 0));
+	}
+
+	/** True if an argument is only {@code m}/{@code s} flags (no digits), meaning it modifies every hit. */
+	private static boolean isFlagsOnly(String arg)
+	{
+		return arg.matches("(?i)[ms]+");
+	}
+
+	/** Parses one {@code ::cwsdamage} token (digits plus optional {@code m}/{@code s} flags), or null if malformed. */
+	private static DebugHit parseDebugHit(String token, boolean forceMax, boolean forceSpec)
+	{
+		String s = token.toLowerCase();
+		boolean isMax  = forceMax  || s.indexOf('m') >= 0;
+		boolean wasSpec = forceSpec || s.indexOf('s') >= 0;
+		String digits = s.replace("m", "").replace("s", "");
+		try
+		{
+			return new DebugHit(Integer.parseInt(digits), isMax, wasSpec);
+		}
+		catch (NumberFormatException e)
+		{
+			return null;
+		}
+	}
+
+	/** Injects one tick's simulated hitsplats, all landing this tick, attributed to the given (or equipped) weapon. */
+	private void injectDebugHits(DebugTick debugTick)
+	{
+		if (debugTick.hits.isEmpty()) return; // a "-" skip tick: consume the tick, land nothing
+
+		int weaponId = debugTick.weaponId >= 0 ? debugTick.weaponId : getEquippedWeaponId();
+		if (weaponId < 0)
+		{
+			debugMessage("No weapon equipped — set a debug weapon from its right-click menu, or equip a weapon.");
+			debugDamageQueue.clear();
+			return;
+		}
+
+		int tick = client.getTickCount();
+		WeaponEntry entry = weapons.find(weaponId);
+		boolean enabled = entry != null && entry.isEnabled();
+		List<TriggerGroup> groups = enabled ? entry.getGroups() : java.util.Collections.emptyList();
+		boolean dontOverrideGlobal = enabled && entry.isDontOverrideGlobal();
+
+		for (DebugHit hit : debugTick.hits)
+			hits.add(new DeferredHit(weaponId, groups, dontOverrideGlobal, hit.wasSpec, hit.amount, hit.isMax, tick, null));
+	}
+
+	private void debugMessage(String message)
+	{
+		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "[Custom Weapon SFX] " + message, null);
+	}
+
 	private void evaluatePendingAttacks(List<PendingAttack> pendingAttacks)
 	{
 		boolean specHitsplatSeen = false;
@@ -442,29 +633,64 @@ public class CustomWeaponSfxPlugin extends Plugin
 			boolean isKill = attack.actors.stream()
 					.filter(a -> a instanceof Player && a != client.getLocalPlayer())
 					.anyMatch(a -> ((Player) a).getHealthRatio() == 0);
-			AttackOutcome outcome = attack.collapse(isKill);
-			boolean suppressMax  = opt(SfxOption.IGNORE_SMALL_MAX) && outcome.allMax && outcome.maxAmount <= 3;
-			boolean suppressZero = opt(SfxOption.IGNORE_ZERO_THRALL) && thrallTicksRemaining > 0;
-			if (!(attack.groups == receivedGroups && suppressReceivedOnDeath))
+
+			// Some attacks land several hitsplats spread across two ticks — claws' spec, or the dark bow's two
+			// arrows — and paint the max-hit colour on only some of them. For those weapons an AttackProfile
+			// tells us to aggregate the whole attack into one (fired once its hits complete — see onGameTick)
+			// so triggers evaluate on the combined max/hit/total rather than each tick's partial.
+			if (attack.groups != receivedGroups)
 			{
-				soundPlayer.fireMatchingGroups(attack.groups, outcome.wasSpec, outcome.anyHit, outcome.allZero, outcome.allMax,
-						suppressMax, suppressZero, outcome.isKill, EnumSet.noneOf(Triggers.class));
+				if (attackSpread.isActiveFor(attack.key))
+				{
+					attackSpread.add(attack.amounts, attack.isMaxList, attack.wasSpec, isKill);
+					continue;
+				}
+				AttackProfile profile = AttackProfiles.forWeapon(attack.key);
+				// specialOnly profiles (claws) aggregate only the spec; others (dark bow, twinflame) aggregate every attack.
+				if (profile != null && (!profile.isSpecialOnly() || attack.wasSpec))
+				{
+					attackSpread.begin(attack.key, attack.tick, profile, attack.groups, attack.dontOverrideGlobal);
+					attackSpread.add(attack.amounts, attack.isMaxList, attack.wasSpec, isKill);
+					// A spec is now owned by the aggregator; close the spec window so later hits (a tail splat, or
+					// a following normal attack) aren't independently tagged as a spec.
+					if (attack.wasSpec) spec.clearWindow();
+					continue;
+				}
 			}
 
-			if (opt(SfxOption.GLOBAL_ENABLED) && attack.groups != receivedGroups)
-			{
-				Set<Triggers> weaponCoveredTriggers = coveredGlobalTriggers(attack.groups, attack.dontOverrideGlobal);
-				soundPlayer.fireMatchingGroups(globalWeaponGroups, outcome.wasSpec, outcome.anyHit, outcome.allZero, outcome.allMax,
-						suppressMax, suppressZero, outcome.isKill, weaponCoveredTriggers);
-			}
-
-			if (outcome.wasSpec) specHitsplatSeen = true;
+			fireAttack(attack.key, attack.groups, attack.dontOverrideGlobal, attack.collapse(isKill));
+			if (attack.wasSpec) specHitsplatSeen = true;
 		}
 		// Clear the spec window as soon as the spec's hitsplat has been processed
 		// so the next normal attack isn't silently swallowed by the wasSpec flag.
 		if (specHitsplatSeen)
 		{
 			spec.clearWindow();
+		}
+	}
+
+	/** Fires the weapon's groups and (unless overridden) the Global groups that match {@code outcome}. */
+	private void fireAttack(int weaponId, List<TriggerGroup> groups, boolean dontOverrideGlobal, AttackOutcome outcome)
+	{
+		if (soundPlayer == null) return;
+
+		boolean suppressMax  = opt(SfxOption.IGNORE_SMALL_MAX) && outcome.allMax && outcome.maxAmount <= 3;
+		boolean suppressZero = opt(SfxOption.IGNORE_ZERO_THRALL) && thrallTicksRemaining > 0;
+		if (!(groups == receivedGroups && suppressReceivedOnDeath))
+		{
+			soundPlayer.fireMatchingGroups(groups, outcome.wasSpec, outcome.anyHit, outcome.allZero, outcome.allMax,
+					suppressMax, suppressZero, outcome.isKill, EnumSet.noneOf(Triggers.class), outcome.amounts);
+		}
+
+		if (opt(SfxOption.GLOBAL_ENABLED) && groups != receivedGroups)
+		{
+			Set<Triggers> weaponCoveredTriggers = coveredGlobalTriggers(groups, dontOverrideGlobal);
+			// Each Global group can blacklist specific weapons; skip the groups that exclude this one.
+			List<TriggerGroup> applicable = globalWeaponGroups.stream()
+					.filter(g -> !g.isBlacklisted(weaponId))
+					.collect(Collectors.toList());
+			soundPlayer.fireMatchingGroups(applicable, outcome.wasSpec, outcome.anyHit, outcome.allZero, outcome.allMax,
+					suppressMax, suppressZero, outcome.isKill, weaponCoveredTriggers, outcome.amounts);
 		}
 	}
 
@@ -587,6 +813,35 @@ public class CustomWeaponSfxPlugin extends Plugin
 			if (weaponId < 0) return;
 			String name = client.getItemDefinition(weaponId).getName();
 			weapons.add(weaponId, name);
+		});
+	}
+
+	/**
+	 * Opens the weapon search and hands the picked item's id + name back to {@code sink} (a group's
+	 * blacklist add). Resolving the item needs the client thread; the panel's sink hops back to the EDT.
+	 */
+	private void pickWeaponForBlacklist(java.util.function.BiConsumer<Integer, String> sink)
+	{
+		clientThread.invoke(() ->
+		{
+			if (!requireLoggedIn("search for weapons")) return;
+			weaponSearch
+				.onItemSelected(itemId ->
+					sink.accept(itemId, client.getItemDefinition(itemId).getName()))
+				.build();
+		});
+		client.getCanvas().requestFocusInWindow();
+	}
+
+	/** Hands the currently equipped weapon's id + name back to {@code sink} — the no-search counterpart. */
+	private void pickEquippedForBlacklist(java.util.function.BiConsumer<Integer, String> sink)
+	{
+		clientThread.invoke(() ->
+		{
+			if (!requireLoggedIn("add an equipped weapon")) return;
+			int weaponId = getEquippedWeaponId();
+			if (weaponId < 0) return;
+			sink.accept(weaponId, client.getItemDefinition(weaponId).getName());
 		});
 	}
 

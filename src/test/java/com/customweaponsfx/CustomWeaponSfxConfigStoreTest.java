@@ -59,6 +59,12 @@ public class CustomWeaponSfxConfigStoreTest
 	private static void assertGroupEquals(TriggerGroup expected, TriggerGroup actual)
 	{
 		assertEquals(expected.getTriggers(), actual.getTriggers());
+		assertEquals(expected.getAmountConditions().keySet(), actual.getAmountConditions().keySet());
+		for (Triggers t : expected.getAmountConditions().keySet())
+		{
+			assertEquals(expected.getAmountCondition(t).getOp(), actual.getAmountCondition(t).getOp());
+			assertEquals(expected.getAmountCondition(t).getValue(), actual.getAmountCondition(t).getValue());
+		}
 		assertEquals(expected.getChance(), actual.getChance());
 		assertEquals(expected.getSounds().size(), actual.getSounds().size());
 		for (int i = 0; i < expected.getSounds().size(); i++)
@@ -135,6 +141,23 @@ public class CustomWeaponSfxConfigStoreTest
 		backend.set("specWeaponIds", "555");
 
 		assertFalse(store.loadWeapons().get(0).isDontOverrideGlobal());
+	}
+
+	@Test
+	public void amountConditionRoundTripsThroughSaveAndLoad()
+	{
+		String prefix = CustomWeaponSfxPanel.GLOBAL_WEAPON_GROUPS_PREFIX;
+		List<TriggerGroup> groups = new ArrayList<>();
+		TriggerGroup g = group(EnumSet.of(Triggers.REGULAR_AMOUNT), 100, new SoundEntry("boom", 80));
+		g.setAmountCondition(Triggers.REGULAR_AMOUNT, new AmountCondition(AmountCondition.Op.EQUAL, 73));
+		groups.add(g);
+
+		store.saveDefaultGroups(prefix, groups);
+
+		TriggerGroup loaded = store.loadDefaultGroups(prefix).get(0);
+		AmountCondition c = loaded.getAmountCondition(Triggers.REGULAR_AMOUNT);
+		assertEquals(AmountCondition.Op.EQUAL, c.getOp());
+		assertEquals(73, c.getValue());
 	}
 
 	@Test
@@ -268,6 +291,34 @@ public class CustomWeaponSfxConfigStoreTest
 		assertTrue(store.loadWeapons().isEmpty());
 		assertTrue(store.loadDefaultGroups(CustomWeaponSfxPanel.RECEIVED_GROUPS_PREFIX).isEmpty());
 		assertTrue(store.loadDefaultGroups(CustomWeaponSfxPanel.GLOBAL_WEAPON_GROUPS_PREFIX).isEmpty());
+	}
+
+	@Test
+	public void groupBlacklistRoundTripsThroughSaveAndLoad()
+	{
+		String prefix = CustomWeaponSfxPanel.GLOBAL_WEAPON_GROUPS_PREFIX;
+		List<TriggerGroup> groups = new ArrayList<>();
+		TriggerGroup g = group(EnumSet.of(Triggers.ALL), 100, new SoundEntry("g", 50));
+		g.addToBlacklist(4151, "Abyssal whip");
+		g.addToBlacklist(1215, "Dragon dagger");
+		groups.add(g);
+
+		store.saveDefaultGroups(prefix, groups);
+
+		TriggerGroup loaded = store.loadDefaultGroups(prefix).get(0);
+		assertEquals(2, loaded.getBlacklist().size());
+		assertTrue(loaded.isBlacklisted(4151));
+		assertTrue(loaded.isBlacklisted(1215));
+		assertEquals("Abyssal whip", loaded.getBlacklist().get(0).getWeaponName());
+		assertEquals("Dragon dagger", loaded.getBlacklist().get(1).getWeaponName());
+	}
+
+	@Test
+	public void groupWithoutBlacklistLoadsEmpty()
+	{
+		backend.set("globalWeapon_groupCount", 1);
+		backend.set("globalWeapon_group_0_triggers", "ALL");
+		assertTrue(store.loadDefaultGroups("globalWeapon").get(0).getBlacklist().isEmpty());
 	}
 
 	@Test
